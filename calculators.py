@@ -97,13 +97,11 @@ def make_k_hamiltonian_velocity_calculator(model: TB_model,use_A:bool=False):
                             Phase_W, 
                             cell_center
                             )
-        # part 2: 
         part2 = jnp.einsum('iab, i, ab, abd -> abd', 
                             HR, 
                             Phase_R, 
                             Phase_W, 
                             center_matrix)  
-        # dH/dk  = i (part1 - part2)
         Hk_derivative = 1j*(part1 + part2)
 
         if use_A:
