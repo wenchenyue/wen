@@ -2,7 +2,7 @@
 import numpy as np
 import jax
 import jax.numpy as jnp
-from utilty import cal_center_matrix, find_EF
+from utility import cal_center_matrix, find_EF
 
 # using double precision
 jax.config.update("jax_enable_x64", True)

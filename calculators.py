@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 from TB_model import TB_model
-from utilty import fermi_dirac_vamp
+from utility import fermi_dirac_vamp
 
 
 # using double precision
