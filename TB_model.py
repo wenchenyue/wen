@@ -74,8 +74,6 @@ class TB_model:
         self.O_list_inner[name] = operator
         print (f"add operator {name} in inner list")
 
-
-
     def clear_operator(self, category: str="all"):
         '''
         clear all operators in the model

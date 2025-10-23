@@ -1,0 +1,16 @@
+import numpy as np
+import jax
+import jax.numpy as jnp
+from calculators import make_calc_inner, make_calc_kubo
+
+jax.config.update("jax_enable_x64", True)
+
+
+def run_mesh(kps:jnp.ndarray,
+             calculator:calculator,
+             batch_size:int=1000,
+             ):
+    pass
+
+def run_path():
+    pass
