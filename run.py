@@ -7,7 +7,7 @@ jax.config.update("jax_enable_x64", True)
 
 
 def run_mesh(kps:jnp.ndarray,
-             calculator:calculator,
+             calculator:callable,
              batch_size:int=1000,
              ):
     pass

@@ -14,7 +14,8 @@ default_type_real = jnp.float64
 
 #hamiltonian in k space
 # use functional factory to make a calculator
-# it should be coupled, so just pass the data calss
+# pass a dataclass because the calculator should be coupled to the model
+
 from typing import Any
 
 
