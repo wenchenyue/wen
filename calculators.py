@@ -158,7 +158,7 @@ def make_calc_inner(model: TB_model,kbT:float=0.0):
         E_min = E_fermis[0]
         E_max = E_fermis[-1]
         interval = E_fermis[1] - E_fermis[0]
-        print(f"please confirm: E_min = {E_min}, E_max = {E_max}, interval = {interval}")
+        print(f"please confirm: E_min = {E_min:.3f}, E_max = {E_max:.3f}, interval = {interval:.3f}")
         scan = True
     else:
         # list of energy states, so E_fermis is not necessary

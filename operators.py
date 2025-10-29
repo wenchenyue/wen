@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as jnp
+from matplotlib import use
 
 
 # using double precision
@@ -18,12 +19,12 @@ num_ao = { # num of atomic orbitals for each orbital type, considering spin
 operator = jnp.load("operator.npz")
 
 class operator_matrix_all:
-    def __init__(self,orbital_list:list[str]):
+    def __init__(self,orbital_list:list[str],use_LS_base=False):
         self.orbital_list = orbital_list
         self.orbital_all = build_operator_all(orbital_list)
         self.ndim = len(self.orbital_all)
 
-        self.S,self.L,self.LS = build_operator_LS(orbital_list,use_LS_base=True)
+        self.S,self.L,self.LS = build_operator_LS(orbital_list,use_LS_base=use_LS_base)
 
         self.pre_prepared_operators = {
             'Sx' :self.S[:,:,0],
