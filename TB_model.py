@@ -117,7 +117,8 @@ class TB_model:
         return: a function, which takes k as input, and return inner quantity as output
         '''
         from calculators import make_calc_inner
-        return make_calc_inner(self,kbT)
+        self.inner_calculator = make_calc_inner(self,kbT)
+        return self.inner_calculator    
     
     def make_calc_kubo(self,
                         alpha:int = 0,#1st direction of kubo formula
@@ -131,7 +132,8 @@ class TB_model:
         return: a function, which takes k as input, and return kubo quantity as output
         '''
         from calculators import make_calc_kubo
-        return make_calc_kubo(self,alpha,beta,Gamma,kbT,use_A)
+        self.kubo_calculator = make_calc_kubo(self,alpha,beta,Gamma,kbT,use_A)
+        return self.kubo_calculator 
     
     def make_k_mesh(self,
                     nkx:int=100,
@@ -143,7 +145,13 @@ class TB_model:
         return: a k-mesh, shape (nkx,nky,nkz,3)
         '''
         from K_space import build_k_mesh
-        return build_k_mesh(self,nkx,nky,nkz)
+        kmesh, k_points = build_k_mesh(self,nkx,nky,nkz)
+        self.k_mesh = kmesh
+        self.k_points = k_points
+        self.nkx = nkx
+        self.nky = nky
+        self.nkz = nkz
+        return kmesh, k_points
     
     def make_k_path(self,
                     k_points:jnp.ndarray,
@@ -162,6 +170,74 @@ class TB_model:
         from K_space import build_k_path
         return build_k_path(self,k_points,ticks_label,length)
         
+    def run_all(self,batch_size:int=1000,tabulate:bool=False):
+        '''
+        run all calculators for given k points
+        '''
+
+        res_dict = {}
+        res_dict['inner'] = {}
+        if self.kubo_calculator is not None:
+            res_dict['kubo'] = {}
+        
+        if self.k_points is None:
+            raise ValueError("k_points is None, please make k mesh first")
+        k_points = self.k_points
+        nk = k_points.shape[0]
+        V_k =self.V / nk
+
+        from run import run_kps
+
+        print("run inner calculator")
+        res_inner = run_kps(k_points,
+                           self.inner_calculator,
+                           batch_size=batch_size,
+                           tabulate=tabulate,)
+
+        # post process res_inner
+        res_dict['inner']["Energy"] = res_inner[0]
+        i = 1
+        for name in self.O_list_inner.keys():
+            tmp = res_inner[i]
+            if tabulate:
+                tmp = tmp.reshape([self.nkx,self.nky,self.nkz,-1])
+            else:
+                tmp = tmp*V_k
+            res_dict['inner'][name] = tmp
+            i += 1
+        # time
+        from time import time
+        time_str = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime())
+        print(f"finish inner calculation at {time_str}")
+        print("------------------------")
+
+
+
+        print("run kubo calculator")
+        res_kubo = run_kps(k_points,
+                           self.kubo_calculator,
+                           batch_size=batch_size,
+                           tabulate=tabulate,)
+                           
+        for i,name in enumerate(self.O_list_kubo.keys()):
+            tmp = res_kubo[i]
+            if tabulate:
+                tmp = tmp.reshape([self.nkx,self.nky,self.nkz,-1])
+            else:
+                tmp = tmp*V_k
+            res_dict['kubo'][name] = tmp
+
+        # time
+        from time import time
+        time_str = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime())
+        print(f"finish kubo calculation at {time_str}")
+        print("------------------------")
+
+        # save to pickle file
+        import pickle
+        with open(f"res_dict_{time_str}.pkl", "wb") as f:
+            pickle.dump(res_dict, f)
+
 
 
 

@@ -76,8 +76,7 @@ def build_k_mesh(model:TB_model,
     k_points = k_mesh.reshape(-1,3)
     k_points = jnp.dot(k_points,model.recip_lattice)
     print(f"there are {nk} k points in k mesh")
-    model.k_mesh = k_mesh
     
-    return k_points
+    return k_mesh, k_points
 
 #========================================END

@@ -4,7 +4,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
-from TB_model import TB_model
+
 
 
 jax.config.update("jax_enable_x64", True)
@@ -29,7 +29,7 @@ def run_kps(
 
     if tabulate:
         # nk, n_operator, n_fermi(or n_band)
-        results = jnp.zeros([nk,warm_up.shape[0],warm_up.shape[1]],
+        results = jnp.zeros([warm_up.shape[0],warm_up.shape[1],nk],
                              device=jax.devices("cpu")[0],dtype=default_type_real)
         # estimate memory usage
         mem_usage = nk * warm_up.size * 8 / 1024 / 1024
@@ -75,7 +75,7 @@ def run_kps(
             result = calculator_vmap(batch_k)
         
         if tabulate:
-            results = results.at[start_idx:end_idx].set(result)
+            results = results.at[:,:,start_idx:end_idx].set(result)
         else:
             results += jnp.sum(result,axis=0)
 
