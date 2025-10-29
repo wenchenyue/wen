@@ -254,10 +254,11 @@ batch_size = 1000  # 调整以适应您的GPU内存
 
 ## 许可证
 
-[根据项目中的LICENSE文件]
+MIT许可证
 
 ---
 
 ## 联系方式
 
 如有问题或建议，请联系项目维护者。
+wenchenyue5678@buaa.edu.cn
