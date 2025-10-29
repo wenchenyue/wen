@@ -18,7 +18,14 @@ def run_kps(
              batch_size:int=1000,
              tabulate:bool=False,
              ):
-
+    '''
+    run a calculator for a list of k-points
+    param kps: k-points, shape (nk,3)
+    param calculator: a function, which takes k as input, and return observable as output
+    param batch_size: batch size, default is 1000
+    param tabulate: whether to tabulate the results, default is False
+    return: observable, shape (nk,n_operator,n_fermi(or n_band)) if tabulate is True, else (n_operator,n_fermi(or n_band))
+    '''
 
     nk = kps.shape[0]
        
@@ -29,7 +36,7 @@ def run_kps(
 
     if tabulate:
         # nk, n_operator, n_fermi(or n_band)
-        results = jnp.zeros([warm_up.shape[0],warm_up.shape[1],nk],
+        results = jnp.zeros([nk,warm_up.shape[0],warm_up.shape[1]],
                              device=jax.devices("cpu")[0],dtype=default_type_real)
         # estimate memory usage
         mem_usage = nk * warm_up.size * 8 / 1024 / 1024
@@ -75,7 +82,7 @@ def run_kps(
             result = calculator_vmap(batch_k)
         
         if tabulate:
-            results = results.at[:,:,start_idx:end_idx].set(result)
+            results = results.at[start_idx:end_idx].set(result)
         else:
             results += jnp.sum(result,axis=0)
 
@@ -101,7 +108,7 @@ if __name__ == "__main__":
     
     model.add_operator_kubo(matrix_all.pre_prepared_operators["Lz"], "Lz")
 
-    inner_calculator = model.make_calc_inner(kbT = 0.026)
+    inner_calculator = model.make_calc_inner(kbT=0.026)
     kubo_calculator =  model.make_calc_kubo(kbT=0.026)
 
     # make k-mesh

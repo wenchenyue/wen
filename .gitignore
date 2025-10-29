@@ -6,3 +6,5 @@
 /*.nscf.out
 /*.ipynb
 /*.npy
+/*.pickle
+/*.pkl

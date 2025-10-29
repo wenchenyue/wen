@@ -20,6 +20,7 @@ class TB_model:
     recip_lattice: jnp.ndarray = None # (3,3)
     center_list: jnp.ndarray = None # (nwan,3)
     AA_R: jnp.ndarray = None # (nR,nwan,nwan,3)
+    k_points: jnp.ndarray = None # (nk,3)
 
     # post init: calculate some useful quantities
     def __post_init__(self):
@@ -198,37 +199,36 @@ class TB_model:
         res_dict['inner']["Energy"] = res_inner[0]
         i = 1
         for name in self.O_list_inner.keys():
-            tmp = res_inner[i]
             if tabulate:
-                tmp = tmp.reshape([self.nkx,self.nky,self.nkz,-1])
+                tmp = res_inner[:,i,:]
+                res_dict['inner'][name] = tmp.reshape([self.nkx,self.nky,self.nkz,-1])
             else:
-                tmp = tmp*V_k
-            res_dict['inner'][name] = tmp
+                tmp = res_inner[i,:]
+                res_dict['inner'][name] = tmp*V_k
             i += 1
         # time
-        from time import time
+        import time
         time_str = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime())
         print(f"finish inner calculation at {time_str}")
         print("------------------------")
 
 
-
-        print("run kubo calculator")
-        res_kubo = run_kps(k_points,
-                           self.kubo_calculator,
-                           batch_size=batch_size,
-                           tabulate=tabulate,)
-                           
-        for i,name in enumerate(self.O_list_kubo.keys()):
-            tmp = res_kubo[i]
-            if tabulate:
-                tmp = tmp.reshape([self.nkx,self.nky,self.nkz,-1])
-            else:
-                tmp = tmp*V_k
-            res_dict['kubo'][name] = tmp
+        if self.kubo_calculator is not None:
+            print("run kubo calculator")
+            res_kubo = run_kps(k_points,
+                            self.kubo_calculator,
+                            batch_size=batch_size,
+                            tabulate=tabulate,)
+                            
+            for i,name in enumerate(self.O_list_kubo.keys()):
+                if tabulate:
+                    tmp = res_kubo[:,i,:]
+                    res_dict['kubo'][name] = tmp.reshape([self.nkx,self.nky,self.nkz,-1])
+                else:
+                    tmp = res_kubo[i,:]
+                    res_dict['kubo'][name] = tmp*V_k    
 
         # time
-        from time import time
         time_str = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime())
         print(f"finish kubo calculation at {time_str}")
         print("------------------------")
@@ -240,4 +240,25 @@ class TB_model:
 
 
 
+if __name__ == "__main__":
+    from TB_io import read_TB_model
+    import operators as ops
+    model = read_TB_model("TB.npz")
+    # fermi level
+    model.set_EF("Cu.scf.out")
+    model.set_E_fermis(-10,8,0.05)
+    # operators
+    model.add_operator_inner(jnp.eye(model.nwan), "cumDOS")
+    #use ops
+    matrix_all = ops.operator_matrix_all(['spd'])
+    model.add_operator_kubo(matrix_all.pre_prepared_operators["Lz"], "Lz")
 
+    #calculators
+    _inner_calculator = model.make_calc_inner(kbT=0.026)
+    _kubo_calculator =  model.make_calc_kubo(kbT=0.026)
+
+    # k_mesh
+    _,_ = model.make_k_mesh(nkx=100,nky=100,nkz=100)
+
+    # run 
+    model.run_all(batch_size=1000,tabulate=False)
