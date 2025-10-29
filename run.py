@@ -82,15 +82,6 @@ def run_kps(
     return results
 
 
-def run_all(model:TB_model,
-            kbT:float = 0.026,
-            batch_size:int=1000,
-            tabulating:bool = False,
-            use_A = False,
-            ):
-    inner_calculator = model.make_calc_inner(kbT = 0.026)
-    if len(list(model.O_list_inner.values()))>0:
-        kubo_calculator = model.make_calc_kubo(kbT = 0.026,)
 
 
 if __name__ == "__main__":
