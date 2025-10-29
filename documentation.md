@@ -1,142 +1,263 @@
-# 项目介绍
-1. 项目名称：TB_model
-2. 项目描述：基于Jax的紧束缚模型
-3. 项目作者：文陈跃
-4. 项目日期：2025-10-17
+# 紧束缚模型计算工具包 (TB_model)
 
-# 项目基础
-1. 基于wannier90 生成的 tight-binding 模型
-2. 使用wannierberri 生成必要的矩阵 (get_WB.py),包括
-    1. HR
-    2. cRvec
-    3. real_lattice
-    4. reciprocal_lattice
-    5. Wan_center
-    6. AA_R
-3. 通过HR计算Hk
-4. 目标是计算内积型物理量与Kubo型物理量
+## 项目概述
 
-# 当前目标
-1. 已经完成的：TB_model_old.py,一个大致完整的实现
-2. 该代码的文档：documentation.md
-3. 这两个文件已经添加到了gitignore中，不会被提交到版本控制中
-4. 已知问题：
-    1. 该代码的显存占用可能在部分情况下较高，也许可以通过一些优化来减少显存占用
-    2. 该代码写成了上帝类，包含了太多的功能，需要拆分
-    3. 添加物理量算符的方法简陋，需要重新写
-    4. 运行接口的进一步优化
-5. 重构思路：
-    1. 拆分上帝类，只将数据结构封装成类，
-    2. 将不同的计算写成函数，使用JAX推荐的函数式编程风格
-    3. 优化物理量算符的添加方法，使代码更加清晰
-    4. 进一步优化运行接口，使代码更加易用
-    5. 代码的注释使用英文，以对接国际合作者
-    6. 使用git管理代码版本
-    7. 开发过程中使用ipynb，方便调试（dev.ipynb）
+这是一个基于JAX和NumPy的紧束缚模型(Tight-Binding Model)计算工具包，专为凝聚态物理和材料科学研究设计。该工具包提供了高效的电子结构计算功能，特别利用了JAX的自动微分和JIT编译能力，支持GPU加速，适用于大规模k空间积分和物理量计算。
 
-# 开发计划
+## 主要功能
 
-## 1. 代码重构阶段
+- 构建和处理紧束缚哈密顿量
+- 计算k空间中的能量本征值和本征向量
+- 计算态密度(DOS)和部分态密度(PDOS)
+- 使用Kubo公式计算电导率等输运性质
+- 支持费米能级扫描计算
+- 构建k网格和高对称路径用于能带结构计算
+- 内置多种物理算符(S、L、LS耦合等)
+- 支持GPU并行计算和批处理
 
-### 1.1 基础数据结构定义
-- [x] 创建基本的TB模型数据结构类，使用@dataclass装饰器
-- [x] 实现从TB.npz文件加载数据的功能
-- [ ] 添加数据验证和参数检查
+## 项目结构
 
-### 1.2 核心计算函数实现
-- [x] 实现k空间哈密顿量计算函数
-- [x] 实现哈密顿量导数计算函数
-- [x] 实现中心矩阵计算函数
-- [x] 实现费米-狄拉克函数及向量化版本
+```
+TB_model/
+├── TB_model.py      # 核心紧束缚模型类定义
+├── TB_io.py         # 模型输入输出功能
+├── calculators.py   # 各种物理量计算器实现
+├── K_space.py       # k空间相关功能
+├── operators.py     # 物理算符定义
+├── utility.py       # 辅助功能和工具函数
+├── run.py           # 示例运行脚本
+├── TB.npz           # 紧束缚模型数据文件
+├── operator.npz     # 预定义算符数据文件
+└── documentation.md # 项目文档
+```
 
-### 1.3 算符管理系统
-- [ ] 设计灵活的算符注册机制
-- [x] 实现内置算符(Sx, Sy, Sz, Lx, Ly, Lz, LS, I)的注册
-- [x] 支持用户自定义算符添加
-- [ ] 实现轨道投影算符构建函数
+## 核心模块说明
 
-### 1.4 物理量计算模块
-- [x] 实现内积型物理量计算函数
-- [x] 实现Kubo型物理量计算函数
-- [x] 实现Berry curvature计算
-- [x] 支持温度效应和费米分布扫描
+### 1. TB_model.py
 
-## 2. 并行计算优化
+定义了`TB_model`核心数据类，包含紧束缚模型的所有基本参数和方法：
 
-### 2.1 JAX优化策略
-- [x] 使用jax.jit优化计算性能
-- [x] 使用jax.vmap实现向量化计算
-- [ ] 支持jax.pmap多GPU并行计算
-- [ ] 实现批处理计算以减少内存占用
+- **数据属性**：
+  - `HR`: 实空间哈密顿量 (nR, nwan, nwan)
+  - `cell_center`: 实空间格点位置 (nR, 3)
+  - `real_lattice`: 实空间晶格基矢 (3, 3)
+  - `recip_lattice`: 倒空间晶格基矢 (3, 3)
+  - `center_list`: Wannier函数中心位置 (nwan, 3)
+  - `AA_R`: 实空间规范势 (nR, nwan, nwan, 3)
 
-### 2.2 内存优化
-- [ ] 优化大矩阵操作以减少显存占用
-- [ ] 实现数据分块处理机制
-- [ ] 添加内存使用监控和警告
+- **主要方法**：
+  - `set_EF(file_name)`: 设置费米能级
+  - `set_E_fermis(E_btm, E_top, interval)`: 设置费米能级扫描范围
+  - `add_operator_kubo(operator, name)`: 添加用于Kubo计算的算符
+  - `add_operator_inner(operator, name)`: 添加用于内积计算的算符
+  - `make_k_hamiltonian_calculator()`: 创建k空间哈密顿量计算器
+  - `make_calc_inner(kbT)`: 创建内积计算器(如DOS)
+  - `make_calc_kubo(alpha, beta, Gamma, kbT)`: 创建Kubo公式计算器
+  - `make_k_mesh(nkx, nky, nkz)`: 构建k网格
+  - `make_k_path(k_points, ticks_label, length)`: 构建高对称k路径
+  - `run_all(batch_size, tabulate)`: 运行所有计算
 
-## 3. 接口设计与用户体验
+### 2. calculators.py
 
-### 3.1 计算运行接口
-- [ ] 实现k路径计算接口
-- [ ] 实现k网格计算接口
-- [ ] 实现gamma点计算接口
-- [ ] 支持计算结果的保存和加载
+实现了各种物理量的计算功能：
 
-### 3.2 配置系统
-- [ ] 设计配置文件格式
-- [ ] 实现配置文件解析器
-- [ ] 支持命令行参数覆盖配置
+- `make_k_hamiltonian_calculator(model)`: 创建计算k空间哈密顿量的函数
+- `make_k_hamiltonian_velocity_calculator(model, use_A)`: 创建计算哈密顿量和速度算符的函数
+- `make_calc_inner(model, kbT)`: 创建计算内积的函数(可用于DOS计算)
+- `make_calc_kubo(model, alpha, beta, Gamma, kbT, use_A)`: 创建Kubo公式计算器，用于计算电导率等输运性质
 
-## 4. 测试与文档
+### 3. K_space.py
 
-### 4.1 单元测试
-- [ ] 为核心计算函数编写单元测试
-- [ ] 实现算符系统的测试
-- [ ] 编写并行计算的正确性测试
+处理k空间相关操作：
 
-### 4.2 文档编写
-- [ ] 编写API文档（使用英文）
-- [ ] 创建使用示例和教程
-- [ ] 编写性能优化指南
+- `build_k_path(model, k_points, ticks_label, length)`: 构建高对称k路径用于能带计算
+- `build_k_mesh(model, nkx, nky, nkz)`: 构建均匀k网格用于积分计算
 
-## 5. 开发工具与版本控制
+### 4. operators.py
 
-### 5.1 开发环境
-- [ ] 使用dev.ipynb进行开发和调试
-- [ ] 配置依赖管理文件
-- [ ] 设置代码风格检查
+定义各种物理算符：
 
-### 5.2 Git版本控制
-- [ ] 建立Git分支管理策略
-- [ ] 编写提交规范
-- [ ] 设置自动化CI/CD流程
+- `operator_matrix_all`类：管理轨道算符
+  - 支持s、p、d、f轨道
+  - 内置自旋(S)、轨道角动量(L)、自旋-轨道耦合(LS)等算符
+  - 提供投影算符功能
 
-## 6. 开发时间线
+### 5. utility.py
 
-### 第1-2周：基础结构
-- 完成数据结构定义
-- 实现核心计算函数
-- 设计算符管理系统
+提供辅助功能：
 
-### 第3-4周：功能实现
-- 完成物理量计算模块
-- 实现并行计算优化
-- 开发内存优化策略
+- `fermi_dirac(E, mu, kBT)`: 费米-狄拉克分布函数
+- `fermi_dirac_vamp`: 向量化的费米分布函数
+- `cal_center_matrix(center_list)`: 计算Wannier中心差异矩阵
+- `find_EF(file_name)`: 从量子化学计算输出文件中提取费米能级
 
-### 第5-6周：接口与用户体验
-- 完成所有计算运行接口
-- 实现配置系统
-- 编写单元测试
+### 6. TB_io.py
 
-### 第7-8周：测试、文档与部署
-- 完善测试用例
-- 编写完整文档
-- 进行性能测试和优化
-- 最终审核和发布
+处理模型的输入输出：
 
-## 7. 技术栈
-- 编程语言：Python 3.12+
-- 核心库：JAX, NumPy
-- 辅助库：tqdm (进度条), time (时间测量), matplotlib (绘图)
-- 开发工具：Jupyter Notebook, Git
+- `read_TB_model(file_name)`: 从npz或pickle文件读取紧束缚模型
+- `save_TB_model(model, file_name)`: 保存模型到pickle文件
 
+### 7. run.py
+
+提供示例运行脚本：
+
+- `run_kps(kps, calculator, batch_size, tabulate)`: 批量处理k点计算
+- 示例展示如何设置模型、添加算符、创建计算器和运行计算
+
+## 使用指南
+
+### 基本使用流程
+
+1. **加载模型**
+```python
+from TB_io import read_TB_model
+model = read_TB_model("TB.npz")
+```
+
+2. **设置费米能级**
+```python
+model.set_EF("Cu.scf.out")
+model.set_E_fermis(-10, 8, 0.05)  # 设置费米能级扫描范围
+```
+
+3. **添加算符**
+```python
+import jax.numpy as jnp
+import operators as ops
+
+# 添加内积算符(用于DOS计算)
+model.add_operator_inner(jnp.eye(model.nwan), "cumDOS")
+
+# 添加Kubo计算用算符
+matrix_all = ops.operator_matrix_all(['spd'])
+model.add_operator_kubo(matrix_all.pre_prepared_operators["Lz"], "Lz")
+```
+
+4. **创建计算器**
+```python
+# 创建内积计算器
+inner_calculator = model.make_calc_inner(kbT=0.026)
+
+# 创建Kubo计算器
+kubo_calculator = model.make_calc_kubo(kbT=0.026)
+```
+
+5. **构建k网格**
+```python
+k_mesh, k_points = model.make_k_mesh(nkx=100, nky=100, nkz=100)
+k_mesh_flatten = k_points.reshape(-1, 3)
+```
+
+6. **运行计算**
+```python
+from run import run_kps
+
+# 运行Kubo计算
+res_kubo = run_kps(k_mesh_flatten,
+                  kubo_calculator,
+                  batch_size=1000,
+                  tabulate=False)
+
+# 或者使用模型的run_all方法运行所有计算
+model.run_all(batch_size=1000, tabulate=False)
+```
+
+### 高级功能
+
+#### 1. 投影态密度(PDOS)计算
+
+通过添加特定轨道的投影算符，可以计算部分态密度：
+
+```python
+# 创建s轨道的投影算符
+P_s = matrix_all.make_P_easy("s")
+model.add_operator_inner(P_s, "s_PDOS")
+```
+
+#### 2. 高对称路径能带计算
+
+构建高对称k路径并计算能带：
+
+```python
+# 定义高对称点 (以立方晶体为例)
+k_points = jnp.array([
+    [0.0, 0.0, 0.0],    # Γ
+    [0.5, 0.0, 0.0],    # X
+    [0.5, 0.5, 0.0],    # M
+    [0.0, 0.0, 0.0],    # Γ
+])
+ticks_label = ["Γ", "X", "M", "Γ"]
+
+# 构建k路径
+k_path, k_path_x, ticks, ticks_label = model.make_k_path(
+    k_points, ticks_label, length=100
+)
+```
+
+#### 3. GPU加速
+
+该工具包自动检测并使用可用的GPU：
+
+```python
+# 在run_kps函数中会自动检测GPU
+# 确保batch_size能被GPU数量整除
+batch_size = 1000  # 调整以适应您的GPU内存
+```
+
+## 技术特点
+
+1. **高性能计算**：利用JAX的JIT编译和自动向量化实现高效计算
+2. **GPU支持**：内置GPU并行计算能力，可显著加速大规模计算
+3. **模块化设计**：清晰的代码结构和模块化设计，便于扩展和修改
+4. **批处理计算**：支持大批量k点并行计算，可有效管理内存使用
+5. **丰富的算符库**：内置多种物理算符，支持自定义算符
+
+## 依赖项
+
+- Python 3.11+
+- JAX 2.0+
+- NumPy
+- tqdm (进度显示)
+- Matplotlib (可选，用于可视化)
+
+## 性能优化建议
+
+1. 对于大规模计算，调整`batch_size`以平衡计算速度和内存使用
+2. 使用GPU时，确保batch_size是GPU数量的倍数
+3. 对于高分辨率k网格，考虑减小batch_size避免内存溢出
+4. 对于只需要特定能量范围的计算，适当设置费米能级扫描范围
+
+## 示例应用
+
+1. 计算材料的电子结构和能带
+2. 计算态密度和部分态密度
+3. 使用Kubo公式计算电导率等输运性质
+4. 研究自旋-轨道耦合效应
+5. 分析材料的轨道特征和对称性
+
+## 注意事项
+
+1. 确保TB.npz文件包含正确格式的紧束缚模型数据
+2. 使用GPU时注意内存限制，必要时减小batch_size
+3. 对于低温计算，设置合适的kbT值以避免数值不稳定
+4. 在使用Kubo公式计算时，调整Gamma参数以获得合适的展宽
+
+## 扩展与开发
+
+该工具包设计为可扩展的，您可以通过以下方式进行扩展：
+
+1. 添加新的物理算符到`operators.py`
+2. 实现新的计算器功能到`calculators.py`
+3. 扩展`TB_model`类以支持新的模型特性
+4. 开发新的输入/输出功能以支持更多文件格式
+
+## 许可证
+
+[根据项目中的LICENSE文件]
+
+---
+
+## 联系方式
+
+如有问题或建议，请联系项目维护者。
