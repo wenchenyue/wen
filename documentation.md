@@ -109,58 +109,55 @@ TB_model/
 
 ### 基本使用流程
 
-1. **加载模型**
+以下是推荐的简化使用流程，基于TB_model类提供的易用接口：
+
 ```python
 from TB_io import read_TB_model
-model = read_TB_model("TB.npz")
-```
-
-2. **设置费米能级**
-```python
-model.set_EF("Cu.scf.out")
-model.set_E_fermis(-10, 8, 0.05)  # 设置费米能级扫描范围
-```
-
-3. **添加算符**
-```python
-import jax.numpy as jnp
 import operators as ops
+import jax.numpy as jnp
 
+# 1. 加载模型
+model = read_TB_model("TB.npz")
+
+# 2. 设置费米能级
+model.set_EF("Cu.scf.out")  # 从SCF输出文件读取费米能级
+model.set_E_fermis(-10, 8, 0.05)  # 设置费米能级扫描范围
+
+# 3. 添加算符
 # 添加内积算符(用于DOS计算)
 model.add_operator_inner(jnp.eye(model.nwan), "cumDOS")
 
 # 添加Kubo计算用算符
 matrix_all = ops.operator_matrix_all(['spd'])
 model.add_operator_kubo(matrix_all.pre_prepared_operators["Lz"], "Lz")
+
+# 4. 创建计算器
+model.make_calc_inner(kbT=0.026)  # 创建内积计算器
+model.make_calc_kubo(kbT=0.026)   # 创建Kubo计算器
+
+# 5. 设置k网格
+model.make_k_mesh(nkx=100, nky=100, nkz=100)
+
+# 6. 一键运行所有计算 (推荐的简化方法)
+results = model.run_all(batch_size=1000, tabulate=False)
 ```
 
-4. **创建计算器**
-```python
-# 创建内积计算器
-inner_calculator = model.make_calc_inner(kbT=0.026)
+> **提示**：`run_all()`方法是推荐的简化接口，它会自动处理所有已添加的算符和计算器，无需手动传递k点和计算器。
 
-# 创建Kubo计算器
-kubo_calculator = model.make_calc_kubo(kbT=0.026)
-```
+### 替代方式：单独运行计算
 
-5. **构建k网格**
-```python
-k_mesh, k_points = model.make_k_mesh(nkx=100, nky=100, nkz=100)
-k_mesh_flatten = k_points.reshape(-1, 3)
-```
+如需单独运行特定计算，也可以使用以下方式：
 
-6. **运行计算**
 ```python
 from run import run_kps
 
-# 运行Kubo计算
-res_kubo = run_kps(k_mesh_flatten,
-                  kubo_calculator,
-                  batch_size=1000,
-                  tabulate=False)
+# 获取模型中的k网格
+_, k_points = model.make_k_mesh(nkx=100, nky=100, nkz=100)
+k_mesh_flatten = k_points.reshape(-1, 3)
 
-# 或者使用模型的run_all方法运行所有计算
-model.run_all(batch_size=1000, tabulate=False)
+# 单独运行Kubo计算
+kubo_calculator = model.make_calc_kubo(kbT=0.026)
+res_kubo = run_kps(k_mesh_flatten, kubo_calculator, batch_size=1000, tabulate=False)
 ```
 
 ### 高级功能
