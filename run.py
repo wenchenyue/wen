@@ -11,11 +11,10 @@ jax.config.update("jax_enable_x64", True)
 default_type_complex = jnp.complex128
 default_type_real = jnp.float64
 
-
 def run_kps(
               kps:jnp.ndarray,
              calculator:callable,
-             batch_size:int=1000,
+             batch_size:int=100,
              tabulate:bool=False,
              ):
     '''
@@ -35,14 +34,14 @@ def run_kps(
     calculator_vmap = jax.vmap(calculator,in_axes=(0,))
 
     if tabulate:
-        # nk, n_operator, n_fermi(or n_band)
-        results = jnp.zeros([nk,warm_up.shape[0],warm_up.shape[1]],
+        # nk, 1 + n_operator_all, n_fermi(or n_band)
+        Results = jnp.zeros([nk,warm_up.shape[0],warm_up.shape[1]],
                              device=jax.devices("cpu")[0],dtype=default_type_real)
         # estimate memory usage
         mem_usage = nk * warm_up.size * 8 / 1024 / 1024
         print(f"Use tabulating, estimated memory usage: {mem_usage:.3f} MB")
     else:# n_operator, n_fermi(or n_band)
-        results = jnp.zeros(warm_up.shape,device=jax.devices("cpu")[0],dtype=default_type_real)
+        Results = jnp.zeros(warm_up.shape,device=jax.devices("cpu")[0],dtype=default_type_real)
 
     # check GPU
     
@@ -82,23 +81,23 @@ def run_kps(
             result = calculator_vmap(batch_k)
         
         if tabulate:
-            results = results.at[start_idx:end_idx].set(result)
+            Results = Results.at[start_idx:end_idx].set(result)
         else:
-            results += jnp.sum(result,axis=0)
+            Results += jnp.sum(result,axis=0)
 
-    return results
-
-
+    return Results
 
 
+
+# test pass
 if __name__ == "__main__":
     from TB_model import TB_model
     from TB_io import read_TB_model
     import operators as ops
-
+    from calculators import make_calc_all
     model = read_TB_model("TB.npz")
     # set EF
-    model.set_EF("Cu.scf.out")
+    model.EF = 13.43
     model.set_E_fermis(-10,8,0.05)
     # add identity operator
     model.add_operator_inner(jnp.eye(model.nwan), "I")
@@ -108,21 +107,22 @@ if __name__ == "__main__":
     
     model.add_operator_kubo(matrix_all.pre_prepared_operators["Lz"], "Lz")
 
-    inner_calculator = model.make_calc_inner(kbT=0.026)
-    kubo_calculator =  model.make_calc_kubo(kbT=0.026)
+    #inner_calculator = model.make_calc_inner(kbT=0.026)
+    #kubo_calculator =  model.make_calc_kubo(kbT=0.026)
+    all_calculator = make_calc_all(model)
 
     # make k-mesh
-    k_mesh_flatten = model.make_k_mesh(100,100,100)
+    k_mesh,k_mesh_flatten = model.make_k_mesh(100,100,100)
     print(model.k_mesh.shape)
     print(k_mesh_flatten.shape)
     # run
 
-    res_kubo = run_kps(k_mesh_flatten,
-                       kubo_calculator,
+    res = run_kps(k_mesh_flatten,
+                       all_calculator,
                        batch_size=1000,
                        tabulate=False)
-    print(res_kubo.shape)
-    jnp.save("kubo_scan.npy",res_kubo)
+    print(res.shape)
+    jnp.save("results_scan.npy",res)
 
 
 

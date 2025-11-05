@@ -63,8 +63,16 @@ TB_model/
 
 - `make_k_hamiltonian_calculator(model)`: 创建计算k空间哈密顿量的函数
 - `make_k_hamiltonian_velocity_calculator(model, use_A)`: 创建计算哈密顿量和速度算符的函数
-- `make_calc_inner(model, kbT)`: 创建计算内积的函数(可用于DOS计算)
-- `make_calc_kubo(model, alpha, beta, Gamma, kbT, use_A)`: 创建Kubo公式计算器，用于计算电导率等输运性质
+- `make_calc_inner(model)`: 创建计算内积的函数(可用于DOS计算)
+  - 支持计算各种物理量的内积，如态密度(DOS)和部分态密度(PDOS)
+  - 通过添加不同的算符，可以灵活计算各种可观测量
+- `make_calc_kubo(model, alpha, beta, Gamma)`: 创建Kubo公式计算器，用于计算电导率等输运性质
+  - alpha和beta参数定义了电导率张量的方向
+  - Gamma参数控制展宽以避免数值发散
+- `make_calc_all(model, alpha, beta, Gamma, kbT, use_A)`: 集成所有计算功能的统一接口
+  - 整合了内积计算和Kubo公式计算
+  - 支持费米能级扫描(kbT参数)
+  - 使用use_A参数控制是否在速度算符中包含规范势项
 
 ### 3. K_space.py
 
@@ -131,9 +139,15 @@ model.add_operator_inner(jnp.eye(model.nwan), "cumDOS")
 matrix_all = ops.operator_matrix_all(['spd'])
 model.add_operator_kubo(matrix_all.pre_prepared_operators["Lz"], "Lz")
 
-# 4. 创建计算器
-model.make_calc_inner(kbT=0.026)  # 创建内积计算器
-model.make_calc_kubo(kbT=0.026)   # 创建Kubo计算器
+# 4. 创建统一计算器
+# 创建集成了所有计算功能的统一接口
+model.make_calc_all(
+    alpha=0,          # Kubo公式中的第一个方向
+    beta=1,           # Kubo公式中的第二个方向
+    Gamma=0.025,      # 展宽参数，单位eV
+    kbT=0.026,        # 温度，单位eV，室温约为0.026 eV
+    use_A=False       # 是否在速度算符中包含规范势项
+)
 
 # 5. 设置k网格
 model.make_k_mesh(nkx=100, nky=100, nkz=100)
@@ -142,7 +156,10 @@ model.make_k_mesh(nkx=100, nky=100, nkz=100)
 results = model.run_all(batch_size=1000, tabulate=False)
 ```
 
-> **提示**：`run_all()`方法是推荐的简化接口，它会自动处理所有已添加的算符和计算器，无需手动传递k点和计算器。
+> **提示**：
+> - `make_calc_all()`是新的推荐接口，它集成了内积计算和Kubo公式计算
+> - 温度参数(kbT)和规范势选项(use_A)现在统一在`make_calc_all()`中设置
+> - `run_all()`方法会自动处理所有已添加的算符和计算，无需手动传递k点和计算器
 
 ### 替代方式：单独运行计算
 

@@ -118,23 +118,36 @@ class TB_model:
         return: a function, which takes k as input, and return inner quantity as output
         '''
         from calculators import make_calc_inner
-        self.inner_calculator = make_calc_inner(self,kbT)
+        self.inner_calculator = make_calc_inner(self)
         return self.inner_calculator    
     
     def make_calc_kubo(self,
                         alpha:int = 0,#1st direction of kubo formula
                         beta:int  = 1,#2nd direction of kubo formula
                         Gamma:float = 0.025,# smearing width,in eV unit
-                        kbT:float=0.0, # in eV unit
-                        use_A:bool = False, # whether to use A_term, default is False
                        ):
         '''
         make a calculator for kubo quantity
         return: a function, which takes k as input, and return kubo quantity as output
         '''
         from calculators import make_calc_kubo
-        self.kubo_calculator = make_calc_kubo(self,alpha,beta,Gamma,kbT,use_A)
+        self.kubo_calculator = make_calc_kubo(self,alpha,beta,Gamma)
         return self.kubo_calculator 
+    
+    def make_calc_all(self,
+                    alpha:int=0,
+                    beta:int=1,
+                    Gamma:float=0.025,
+                    kbT:float=0.026, # room temperature
+                    use_A:bool=False,
+                        ):
+        '''
+        make all calculators for given model
+        return: a dictionary of calculators
+        '''
+        from calculators import make_calc_all
+        self.all_calculator = make_calc_all(self,alpha,beta,Gamma,kbT,use_A)
+        return self.all_calculator
     
     def make_k_mesh(self,
                     nkx:int=100,
@@ -171,13 +184,14 @@ class TB_model:
         from K_space import build_k_path
         return build_k_path(self,k_points,ticks_label,length)
         
-    def run_all(self,batch_size:int=1000,tabulate:bool=False):
+    def run_all(self,batch_size:int=100,tabulate:bool=False):
         '''
         run all calculators for given k points
         '''
 
         res_dict = {}
-        res_dict['inner'] = {}
+        if self.inner_calculator is not None:
+            res_dict['inner'] = {}
         if self.kubo_calculator is not None:
             res_dict['kubo'] = {}
         
@@ -188,47 +202,29 @@ class TB_model:
         V_k =self.V / nk
 
         from run import run_kps
-
-        print("run inner calculator")
-        res_inner = run_kps(k_points,
-                           self.inner_calculator,
-                           batch_size=batch_size,
-                           tabulate=tabulate,)
-
-        # post process res_inner
-        res_dict['inner']["Energy"] = res_inner[0]
+        res = run_kps(k_points,self.all_calculator,batch_size=batch_size,tabulate=tabulate)
+        print(res.shape)
+        res_dict['energy'] = res[0]
         i = 1
-        for name in self.O_list_inner.keys():
+        for key in self.O_list_inner.keys():
             if tabulate:
-                tmp = res_inner[:,i,:]
-                res_dict['inner'][name] = tmp.reshape([self.nkx,self.nky,self.nkz,-1])
+                tmp = res[:,i,:]
+                res_dict['inner'][key] = tmp.reshape([self.nkx,self.nky,self.nkz,-1])
             else:
-                tmp = res_inner[i,:]
-                res_dict['inner'][name] = tmp*V_k
+                tmp = res[i,:]
+                res_dict['inner'][key] = tmp*V_k
             i += 1
+        for key in self.O_list_kubo.keys():
+            if tabulate:
+                tmp = res[:,i,:]
+                res_dict['kubo'][key] = tmp.reshape([self.nkx,self.nky,self.nkz,-1])
+            else:
+                tmp = res[i,:]
+                res_dict['kubo'][key] = tmp*V_k
+            i += 1
+                
         # time
         import time
-        time_str = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime())
-        print(f"finish inner calculation at {time_str}")
-        print("------------------------")
-
-
-        if self.kubo_calculator is not None:
-            print("run kubo calculator")
-            res_kubo = run_kps(k_points,
-                            self.kubo_calculator,
-                            batch_size=batch_size,
-                            tabulate=tabulate,)
-                            
-            for i,name in enumerate(self.O_list_kubo.keys()):
-                if tabulate:
-                    tmp = res_kubo[:,i,:]
-                    res_dict['kubo'][name] = tmp.reshape([self.nkx,self.nky,self.nkz,-1])
-                else:
-                    tmp = res_kubo[i,:]
-                    res_dict['kubo'][name] = tmp*V_k    
-
-        # time
         time_str = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime())
         print(f"finish kubo calculation at {time_str}")
         print("------------------------")
@@ -239,13 +235,13 @@ class TB_model:
             pickle.dump(res_dict, f)
 
 
-
+# test pass
 if __name__ == "__main__":
     from TB_io import read_TB_model
     import operators as ops
     model = read_TB_model("TB.npz")
     # fermi level
-    model.set_EF("Cu.scf.out")
+    model.EF = 13.43#model.set_EF("Cu.scf.out")
     model.set_E_fermis(-10,8,0.05)
     # operators
     model.add_operator_inner(jnp.eye(model.nwan), "cumDOS")
@@ -254,8 +250,9 @@ if __name__ == "__main__":
     model.add_operator_kubo(matrix_all.pre_prepared_operators["Lz"], "Lz")
 
     #calculators
-    _inner_calculator = model.make_calc_inner(kbT=0.026)
-    _kubo_calculator =  model.make_calc_kubo(kbT=0.026)
+    _inner_calculator = model.make_calc_inner()
+    _kubo_calculator =  model.make_calc_kubo()
+    _all_calculator = model.make_calc_all(kbT=0.026)
 
     # k_mesh
     _,_ = model.make_k_mesh(nkx=100,nky=100,nkz=100)
