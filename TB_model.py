@@ -37,7 +37,10 @@ class TB_model:
         
         # operator list
         self.O_list_inner: dict = {} # list of operators
-        self.O_list_kubo: dict = {} # list of operator names    
+        self.O_list_kubo: dict = {} # list of operator names   
+        # calculator
+        self.inner_calculator = None
+        self.kubo_calculator = None
         
         # print some info
         print (f"TB_model: nwan={self.nwan}, nR={self.nR}")
@@ -250,8 +253,8 @@ if __name__ == "__main__":
     model.add_operator_kubo(matrix_all.pre_prepared_operators["Lz"], "Lz")
 
     #calculators
-    _inner_calculator = model.make_calc_inner()
-    _kubo_calculator =  model.make_calc_kubo()
+    #_inner_calculator = model.make_calc_inner()
+    #_kubo_calculator =  model.make_calc_kubo()
     _all_calculator = model.make_calc_all(kbT=0.026)
 
     # k_mesh
