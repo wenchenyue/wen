@@ -193,9 +193,9 @@ class TB_model:
         '''
 
         res_dict = {}
-        if self.inner_calculator is not None:
+        if len(self.O_list_inner) > 0:
             res_dict['inner'] = {}
-        if self.kubo_calculator is not None:
+        if len(self.O_list_kubo) > 0:
             res_dict['kubo'] = {}
         
         if self.k_points is None:

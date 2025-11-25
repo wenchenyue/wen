@@ -71,15 +71,20 @@ def run_kps(
         end_idx = start_idx + batch_size
         batch_k = kps[start_idx:end_idx]
         
-        if gpu_num > 0:
+        ## running step
+        if gpu_num > 1:
             batch_k = batch_k.reshape([gpu_num,batch_size//gpu_num,3])
             result = calculator_pmap(batch_k)
             # gpu_num, batch_size//gpu_num, n_operator, n_fermi(or n_band)
             # to batch_size, n_operator, n_fermi(or n_band)
-            result = result.reshape([batch_size,*result.shape[2:]])
+            result = jax.device_put(result.reshape([batch_size,*result.shape[2:]]),
+                                    device=jax.devices("cpu")[0])
+
         else:
-            result = calculator_vmap(batch_k)
+            result = jax.device_put(calculator_vmap(batch_k),
+                                    device=jax.devices("cpu")[0])
         
+        ## post processing
         if tabulate:
             Results = Results.at[start_idx:end_idx].set(result)
         else:

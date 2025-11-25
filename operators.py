@@ -1,6 +1,5 @@
 import jax
 import jax.numpy as jnp
-from matplotlib import use
 
 
 # using double precision
