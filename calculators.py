@@ -185,6 +185,9 @@ def make_calc_kubo(
     This calculator implements the Kubo formula for conductivity calculations.
     It calculates the response function using the velocity operator and the provided operators.
     The Kubo formula is implemented with a smearing parameter Gamma to avoid divergence.
+
+    Tips:
+    set O as identity matrix I to calculate the Berry curvature
     '''
 
     O_array = jnp.array(list(model.O_list_kubo.values()))

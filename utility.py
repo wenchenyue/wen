@@ -15,6 +15,14 @@ def fermi_dirac(E,mu,kBT) -> float:
 # return an F-D distrubution of a whole range of E
 fermi_dirac_vamp = jax.vmap(fermi_dirac,in_axes=(0,None,None))
 
+# derivative of fermi-dirac function
+def fermi_dirac_derivative(E,mu,kBT) -> float:
+    f = fermi_dirac(E, mu, kBT)
+    return -f * (1 - f) / (kBT)
+# vamp it, E is an array, in  shape of (nE,), 
+# return an F-D distrubution of a whole range of E
+fermi_dirac_derivative_vamp = jax.vmap(fermi_dirac_derivative,in_axes=(0,None,None))
+
 # calculate difference matrix
 # only need to be computed once
 def cal_center_matrix(center_list):
