@@ -147,12 +147,17 @@ def make_calc_inner(model: TB_model):
     else:
         print(f"calculate the inner product of the operators: {model.O_list_inner.keys()}")
     
-    def _calculator(Vec_k:jnp.ndarray):
+    def _calculator(
+        E_k:jnp.ndarray,
+        Vec_k:jnp.ndarray,
+        velocity_k:jnp.ndarray,
+        ):
         '''
         calculate the inner product of the operators
         para:
-            E_k: jnp.ndarray, # nwan
-            Vec_k: jnp.ndarray, # nwan * nwan
+            E_k: jnp.ndarray, # nwan, eigvals of Hk (ignored for inner product)
+            Vec_k: jnp.ndarray, # nwan * nwan, eigvecs of Hk
+            velocity_k: jnp.ndarray, # nwan * nwan * 3, velocity operator (ignored for inner product)
         return:
             inner_product: jnp.ndarray, # n_operators * nwan
         '''
@@ -311,7 +316,7 @@ def make_calc_all(model:TB_model,
             result = result.at[0,:].set(jnp.sum(temp,axis=0))# sum over nwan
 
             if calculator_inner != None:
-                inner_array = calculator_inner(Vec_k) # n_operators_inner * nwan
+                inner_array = calculator_inner(E_k, Vec_k, velocity_k) # n_operators_inner * nwan
                 temp = inner_array.real[:,:,None] * f_distribution[None,:,:] # n_operators_inner * nwan * len(E_fermis)
                 result = result.at[1:1+n_operators_inner,:].set(jnp.sum(temp,axis=1)) # sum over nwan
             
@@ -323,7 +328,7 @@ def make_calc_all(model:TB_model,
         else:
             result = result.at[0,:].set(E_k) # nwan
             if calculator_inner != None:
-                inner_array = calculator_inner(Vec_k).real # n_operators_inner * nwan
+                inner_array = calculator_inner(E_k, Vec_k, velocity_k).real # n_operators_inner * nwan
                 result = result.at[1:1+n_operators_inner,:].set(inner_array) # set the inner array
             if calculator_kubo != None:
                 kubo_array = calculator_kubo(E_k,Vec_k,velocity_k).real # n_operators_kubo * nwan
