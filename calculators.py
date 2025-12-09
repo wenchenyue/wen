@@ -209,7 +209,7 @@ def make_calc_mag_modern(model: TB_model,gamma:int = 2):
         v_alpha = velocity_k[:,:,alpha]
         Vec_k_dagger = Vec_k.conj().T
 
-        magnetism = jnp.zeros(nwan,dtype=default_type_real)
+        
         denominator = (E_k[None,:] - E_k[:,None])**2
         diag_indices = jnp.diag_indices(nwan)
         denominator = denominator.at[diag_indices].set(jnp.inf)
