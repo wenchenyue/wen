@@ -10,6 +10,11 @@ jax.config.update("jax_enable_x64", True)
 default_type_complex = jnp.complex128
 default_type_real = jnp.float64
 
+levi_civita = jnp.array([
+    [1,2],
+    [2,0],
+    [0,1]]
+    )
 
 # Calculators==================Begin
 
@@ -117,7 +122,110 @@ def make_k_hamiltonian_velocity_calculator(model: TB_model,use_A:bool=False):
         return Hk,velocity_k    
     return _calculator
 
+# one operator
+def make_calc_inner_new(model: TB_model, Operator: jnp.ndarray):
+    '''
+    make a calculator for the inner product of an operator
+    param:
+        model: TB_model, # the model class
+        Operator: jnp.ndarray, # the operator to calculate the inner product with, shape (nwan,nwan)
+    return:
+        _calculator: function, # a calculator for the inner product of the operator
+    ---------------------------------------------------------------------------
+    Tips:
+    if operator O is a identity matrix, then the inner product represents the occupation number
+    because <psi_n(k)|I|psi_m(k)> = <psi_n(k)|psi_m(k)> = delta_{n,m}
+    after fermi scan, states below EF are occupied(1), and above EF are unoccupied(0)
+    thus, the fermi scan results in the cumulative DOS, which is the integral of the DOS
 
+    Similarly, if O is: diag([0,1,1,0,0,...]), where only some elements are 1, 
+    then the PDOS (Partial Density of States for a specific orbital) can be calculated in this way.
+    '''
+    nwan = model.nwan
+    assert Operator.shape == (nwan,nwan), f"Operator shape should be ({nwan},{nwan}), but got {Operator.shape}"
+
+    @jax.jit
+    def _calculator(
+        E_k:jnp.ndarray,
+        Vec_k:jnp.ndarray,
+        velocity_k:jnp.ndarray,
+        ):
+        '''
+        calculate the inner product of the operator with the wave function psi_n(k)
+        para:
+            E_k: jnp.ndarray, # nwan, eigvals of Hk (ignored for inner product)
+            Vec_k: jnp.ndarray, # nwan * nwan, eigvecs of Hk
+            velocity_k: jnp.ndarray, # nwan * nwan * 3, velocity operator (ignored for inner product)
+        return:
+            inner_product: jnp.ndarray, # nwan
+        '''
+        # nwan
+        inner_product = jnp.einsum('ij,jk,ki->i',Vec_k.conj().T,Operator,Vec_k, optimize='optimal')
+        return inner_product
+    return _calculator
+
+# modern theory of orbital magnetism
+def make_calc_mag_modern(model: TB_model,gamma:int = 2):
+    '''
+    make a calculator for the magnetism of the model
+    using modern theory of orbital magnetism 
+    [PHYSICAL REVIEW B 106, 104414 (2022)]
+    [Int. J. Mod. Phys. B 25, 1429 (2011)]
+    param:
+        model: TB_model, # the model class
+        gamma: int, # the direction of the magnetism, default is 2(z direction)
+    return:
+        _calculator: function, # a calculator for the magnetism of the model
+    ---------------------------------------------------------------------------
+    Formula:
+    A detailed derivation of this formula is given in
+    Supplemental Material  of [PHYSICAL REVIEW B 106, 104414 (2022)]
+    M_orb(n,k) = <u(n,k)|r x v|u(n,k)>
+    M_orb(n,k) = Im <∂u(n,k)/∂k|x (H_k+E_nk)|∂u(n,k)/∂k>
+    M_orb(n,k) = Im sum_{m != n} (E_mk+E_nk-2_ef) <u_nk|vel_k|u_mk> X <u_mk|vel_k|u_nk>
+    Note: velocity_k here should be defined without A term
+    '''
+    mu = model.EF
+    nwan = model.nwan
+    print("modern theory of orbital magnetism, make sure use_A = False")
+    alpha, beta = levi_civita[gamma]
+
+    @jax.jit
+    def _calculator(
+        E_k:jnp.ndarray,
+        Vec_k:jnp.ndarray,
+        velocity_k:jnp.ndarray,
+        ):
+        '''
+        calculate the magnetism of the model
+        para:
+            E_k: jnp.ndarray, # nwan, eigvals of Hk
+            Vec_k: jnp.ndarray, # nwan * nwan, eigvecs of Hk
+            velocity_k: jnp.ndarray, # nwan * nwan * 3, velocity operator
+        return:
+            magnetism: jnp.ndarray, # nwan
+        '''
+        v_beta = velocity_k[:,:,beta]
+        v_alpha = velocity_k[:,:,alpha]
+        Vec_k_dagger = Vec_k.conj().T
+
+        magnetism = jnp.zeros(nwan,dtype=default_type_real)
+        denominator = (E_k[None,:] - E_k[:,None])**2
+        diag_indices = jnp.diag_indices(nwan)
+        denominator = denominator.at[diag_indices].set(jnp.inf)
+        numerator = (E_k[None,:] + E_k[:,None]+ 2*mu)
+        factor = numerator / denominator # nwan * nwan
+
+        cross_term1 = (Vec_k @ v_alpha @ Vec_k_dagger) * (Vec_k_dagger @ v_beta @ Vec_k)
+        cross_term2 = (Vec_k @ v_beta @ Vec_k_dagger) * (Vec_k_dagger @ v_alpha @ Vec_k)
+        
+        magnetism = factor @ (cross_term1 - cross_term2)
+        return jnp.imag(jnp.sum(magnetism,axis=1))
+    return _calculator
+
+    
+
+# change all calculators to a simpler form, that run one operator at a time
 def make_calc_inner(model: TB_model):
     '''
     make a calculator for the inner product of the operators
