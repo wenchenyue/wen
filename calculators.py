@@ -165,29 +165,44 @@ def make_calc_inner_new(model: TB_model, Operator: jnp.ndarray):
     return _calculator
 
 # modern theory of orbital magnetism
-def make_calc_mag_modern(model: TB_model,gamma:int = 2):
+
+def make_calc_mag_modern(model: TB_model,gamma:int = 2,use_Pezo:bool = True):
     '''
     make a calculator for the magnetism of the model
     using modern theory of orbital magnetism 
-    [PHYSICAL REVIEW B 106, 104414 (2022)]
-    [Int. J. Mod. Phys. B 25, 1429 (2011)]
+    There are two versions of this theory:
+
+    1. [PHYSICAL REVIEW B 106, 104414 (2022)] by  Pezo
+    this gives intrinsic moment,using formula:
+    M_orb(n,k) = <u(n,k)|r x v|u(n,k)>
+    M_orb(n,k) = Im <∂u(n,k)/∂k|x (H_k - E_nk)|∂u(n,k)/∂k>
+               = Im sum_{q != n} 1/(E_qk-E_nk) <u_nk|vel_k|u_qk> X <u_qk|vel_k|u_nk>
+    M_orb(n,k,gamma) = 
+    Im sum_{q != n} 1/(E_qk-E_nk) <u_nk|vel_k[alpha]|u_qk><u_qk|vel_k[beta]|u_nk> - (alpha <-> beta)
+    
+    2. [Int. J. Mod. Phys. B 25, 1429 (2011)] by Niu and Thonhauser
+    this gives total moment(intrinsic+itinerant),using formula:
+    M_orb(n,k)= ∂(E)/∂B
+    M_orb(n,k) = Im <∂u(n,k)/∂k|x (H_k+E_nk)|∂u(n,k)/∂k>
+    M_orb(n,k) = Im sum_{q != n} (E_qk+E_nk-2_ef)/(E_qk-E_nk)^{2} <u_nk|vel_k|u_qk> X <u_qk|vel_k|u_nk>
+     M_orb(n,k,gamma) = 
+                    Im sum_{q != n} (E_qk+E_nk-2_ef)/(E_qk-E_nk)^{2} <u_nk|vel_k[alpha]|u_qk><u_qk|vel_k[beta]|u_nk> - (alpha <-> beta)
+
     param:
-        model: TB_model, # the model class
+        model: TB_model, # the model data class
         gamma: int, # the direction of the magnetism, default is 2(z direction)
+        use_Pezo: bool, # use Pezo's version or Niu's version, default is Pezo's version
     return:
         _calculator: function, # a calculator for the magnetism of the model
     ---------------------------------------------------------------------------
     Formula:
-    A detailed derivation of this formula is given in
-    Supplemental Material  of [PHYSICAL REVIEW B 106, 104414 (2022)]
-    M_orb(n,k) = <u(n,k)|r x v|u(n,k)>
-    M_orb(n,k) = Im <∂u(n,k)/∂k|x (H_k+E_nk)|∂u(n,k)/∂k>
-    M_orb(n,k) = Im sum_{m != n} (E_mk+E_nk-2_ef) <u_nk|vel_k|u_mk> X <u_mk|vel_k|u_nk>
-    Note: velocity_k here should be defined without A term
+    Note: velocity_k here defined with or without A term may result differently
     '''
+
     mu = model.EF
     nwan = model.nwan
-    print("modern theory of orbital magnetism, make sure use_A = False")
+    print(f"modern theory of orbital magnetism")
+    print(f"calculate {'intrinsic' if use_Pezo else 'intrinsic and itinerant'} moment")
     alpha, beta = levi_civita[gamma]
 
     @jax.jit
@@ -205,22 +220,31 @@ def make_calc_mag_modern(model: TB_model,gamma:int = 2):
         return:
             magnetism: jnp.ndarray, # nwan
         '''
-        v_beta = velocity_k[:,:,beta]
-        v_alpha = velocity_k[:,:,alpha]
         Vec_k_dagger = Vec_k.conj().T
 
+        v_alpha = Vec_k_dagger @ velocity_k[:,:,alpha] @ Vec_k
+        v_beta = Vec_k_dagger @ velocity_k[:,:,beta] @ Vec_k
         
-        denominator = (E_k[None,:] - E_k[:,None])**2
-        diag_indices = jnp.diag_indices(nwan)
-        denominator = denominator.at[diag_indices].set(jnp.inf)
-        numerator = (E_k[None,:] + E_k[:,None]+ 2*mu)
-        factor = numerator / denominator # nwan * nwan
+        Ediff = E_k[None,:] - E_k[:,None] # D[q,n] = E_qk - E_nk
+        jnp.fill_diagonal(Ediff, jnp.inf) # D[n,n] = inf, to achieve n!=m in the SUM
 
-        cross_term1 = (Vec_k @ v_alpha @ Vec_k_dagger) * (Vec_k_dagger @ v_beta @ Vec_k)
-        cross_term2 = (Vec_k @ v_beta @ Vec_k_dagger) * (Vec_k_dagger @ v_alpha @ Vec_k)
+        if use_Pezo:
+            Gqn = 1/(Ediff+1e-12) # 1/(E_qk-E_nk)
+        else:
+            numerator =  E_k[None,:] + E_k[:,None] - 2*mu # (E_qk+E_nk-2_ef)
+            denominator = Ediff**2 + 1e-12 # (E_qk-E_nk)^{2}
+            Gqn = numerator / denominator # (E_qk+E_nk-2_ef)/(E_qk-E_nk)^{2}
+
+        # Cross product of v and v, in direction gamma: v_alpha * v_beta - (alpha <-> beta)
+
+        # term1: sum_{q} G[q,n] * v_alpha[n,q] * v_beta[q,n]
+        cross_term1 = jnp.einsum("qn,nq,qn->n", Gqn, v_alpha, v_beta, optimize='optimal')
+        # term2: sum_{q} G[q,n] * v_beta[n,q] * v_alpha[q,n]
+        cross_term2 = jnp.einsum("qn,nq,qn->n", Gqn, v_beta, v_alpha, optimize='optimal')
         
-        magnetism = factor @ (cross_term1 - cross_term2)
-        return jnp.imag(jnp.sum(magnetism,axis=1))
+        # Take the imaginary part as specified in the formula
+        magnetism = jnp.imag((cross_term1 - cross_term2) / 2)
+        return magnetism
     return _calculator
 
     
@@ -341,7 +365,7 @@ def make_calc_kubo(
         v_beta_eb = Vec_k_dagger @ v_beta @ Vec_k 
 
         # denominator for the kubo formula
-        denominator = (E_k[None,:] - E_k[:,None])**2 + Gamma**2 + 1e-12 # nwan * nwan
+        denominator = (E_k[:,None] - E_k[None,:])**2 + Gamma**2 + 1e-12 # nwan * nwan
         # set to inf where n=m
         diag_indices = jnp.diag_indices(nwan)
         denominator = denominator.at[diag_indices].set(jnp.inf)
