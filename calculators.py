@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 from TB_model import TB_model
+from plot import Omega_array
 from utility import fermi_dirac_vamp
 
 
@@ -121,7 +122,7 @@ def make_k_hamiltonian_velocity_calculator(model: TB_model,use_A:bool=False):
     return _calculator
 
 # one operator
-def make_calc_inner_new(model: TB_model, Operator: jnp.ndarray):
+def make_calc_inner(model: TB_model, Operator: jnp.ndarray):
     '''
     make a calculator for the inner product of an operator
     param:
@@ -203,7 +204,7 @@ def make_calc_mag_modern(model: TB_model,gamma:int = 2,use_Pezo:bool = True):
     print(f"calculate {'intrinsic' if use_Pezo else 'intrinsic and itinerant'} moment")
     alpha, beta = levi_civita[gamma]
 
-    @jax.jit
+
     def _calculator(
         E_k:jnp.ndarray,
         Vec_k:jnp.ndarray,
@@ -277,7 +278,6 @@ def make_calc_mag_matrix(model: TB_model, gamma:int = 2):
     nwan = model.nwan
     alpha, beta = levi_civita[gamma]
 
-    @jax.jit
     def _calculator(
         E_k:jnp.ndarray,
         Vec_k:jnp.ndarray,
@@ -330,9 +330,117 @@ def make_calc_mag_matrix(model: TB_model, gamma:int = 2):
     return _calculator
 
 
+#  a simpler version of kubo calculator
+def make_calc_kubo(
+    model: TB_model,
+    alpha:int = 0,#1st direction of kubo formula
+    beta:int  = 1,#2nd direction of kubo formula
+    Gamma:float = 0.025,# smearing width,in eV unit
+    Operator:jnp.ndarray = None, # default is None, then calc Berry Curvature
+    ):
+    """
+    Make a calculator for the Kubo correlation function of the model.
+
+    This calculator implements the Kubo formula for linear response calculations.
+    It calculates the response function using the velocity operator and, optionally,
+    an additional observable operator.
+
+    If `Operator` is None, it calculates the standard Berry Curvature (intrinsic anomalous Hall conductivity).
+    If `Operator` is provided, it calculates the Berry Curvature associated with that operator
+    (e.g., spin Berry curvature for spin Hall conductivity), using the symmetrized current operator J_O = {O, v}/2.
+
+    The calculation uses a Lorentzian broadening (smearing) parameter `Gamma` to handle energy denominators.
+
+    Args:
+        model: TB_model
+            The tight-binding model class instance.
+        alpha: int, optional
+            The index of the first direction (response direction) in the Kubo formula (0=x, 1=y, 2=z). Default is 0.
+        beta: int, optional
+            The index of the second direction (perturbation direction) in the Kubo formula (0=x, 1=y, 2=z). Default is 1.
+        Gamma: float, optional
+            The smearing width (broadening parameter) in eV. Used in the energy denominator 1/((E_n-E_m)^2 + Gamma^2).
+            Default is 0.025 eV.
+        Operator: jnp.ndarray, optional
+            An optional operator matrix in the orbital basis, shape (nwan, nwan).
+            If provided, the response is calculated for the current operator J_O = 1/2 {Operator, v_alpha}.
+            Default is None.
+
+    Returns:
+        function: A jittable function `_calculator` that computes the Kubo formula term for a given k-point.
+    """
+    nwan = model.nwan
+    if Operator is None:
+        print("calculate Berry Curvature")
+    else:
+        assert Operator.shape == (nwan,nwan), f"Operator shape {Operator.shape} is not (nwan,nwan)"
+
+    def _calculator(
+        E_k:jnp.ndarray,
+        Vec_k:jnp.ndarray,
+        velocity_k:jnp.ndarray,
+        ):
+        """
+        Calculate the Kubo formula term for a given k-point.
+
+        Args:
+            E_k: jnp.ndarray
+                Eigenvalues of H(k), shape (nwan,).
+            Vec_k: jnp.ndarray
+                Eigenvectors of H(k), shape (nwan, nwan). Columns are eigenvectors.
+            velocity_k: jnp.ndarray
+                Velocity operator in the orbital basis, shape (nwan, nwan, 3).
+
+        Returns:
+            jnp.ndarray: The calculated Kubo term (e.g., Berry curvature) for each band, shape (nwan,).
+        """
+        Vec_k_dagger = Vec_k.conj().T
+        
+        # Transform the beta-component of velocity to the band basis: v_beta_band = U^dagger * v_beta_orb * U
+        v_beta =  Vec_k_dagger @ velocity_k[:,:,beta] @ Vec_k
+        # v_alpha will be calculated later depending on whether Operator is present
+
+        # Calculate the energy denominator factor with Lorentzian broadening
+        # denominator[n, m] = (E_n - E_m)^2 + Gamma^2
+        denominator = (E_k[None,:] - E_k[:,None])**2 + Gamma**2 + 1e-12
+        
+        # G[n, m] = 1 / ((E_n - E_m)^2 + Gamma^2)
+        # We exclude diagonal elements (n=m) by setting them to 0.0, as they don't contribute to interband transitions
+        G = jnp.fill_diagonal(1.0/denominator, 0.0, inplace=False) 
+
+        if Operator is None:
+            # Pure Berry Curvature calculation
+            # v_alpha_band = U^dagger * v_alpha_orb * U
+            v_alpha = Vec_k_dagger @ velocity_k[:,:,alpha] @ Vec_k
+        else:
+            # Berry Curvature of an Operator (e.g., Spin Hall)
+            # Construct the symmetrized current operator: J_O = 1/2 * {Operator, v_alpha}
+            J_O = 0.5* (Operator @ velocity_k[:,:,alpha] + velocity_k[:,:,alpha] @ Operator)
+            # Transform J_O to the band basis
+            v_alpha =  Vec_k_dagger @ J_O @ Vec_k
+
+        # Calculate the Kubo formula sum:
+        # Omega_n = Sum_{m != n} G[n,m] * <n|v_alpha|m> * <m|v_beta|n>
+        # 
+        # Method 1: Using einsum (Compact and explicit)
+        # "nm,nm,mn->n":
+        #   G[n,m]      -> 1/((E_n-E_m)^2 + Gamma^2)
+        #   v_alpha[n,m] -> <n|v_alpha|m>
+        #   v_beta[m,n]  -> <m|v_beta|n>
+        #   ->n          -> Sum over m for each n
+        Omega_array = jnp.einsum("nm,nm,mn->n", G, v_alpha, v_beta) 
+        
+        # Method 2: Using element-wise multiplication and sum (Alternative, mathematically equivalent)
+        # part_sum = G * v_alpha * v_beta.T  # v_beta.T[n,m] is v_beta[m,n]
+        # Omega_array = jnp.sum(part_sum, axis=1)
+        
+        # The result is -2 * Im(Omega_array) to get the physical quantity (e.g., Berry curvature)
+        return -2 * jnp.imag(Omega_array)
+    return _calculator
+
 
 # change all calculators to a simpler form, that run one operator at a time
-def make_calc_inner(model: TB_model):
+def make_calc_inner2(model: TB_model):
     '''
     make a calculator for the inner product of the operators
     param:
@@ -385,7 +493,7 @@ def make_calc_inner(model: TB_model):
 
 
 
-def make_calc_kubo(
+def make_calc_kubo2(
     model: TB_model,
     alpha:int = 0,#1st direction of kubo formula
     beta:int  = 1,#2nd direction of kubo formula
