@@ -1,4 +1,5 @@
 
+from math import gamma
 import jax
 import jax.numpy as jnp
 from matplotlib.pyplot import sca
@@ -738,20 +739,26 @@ if __name__ == "__main__":
     import operators as ops
     from tqdm import trange
 
-    model = read_TB_model("TB.npz")
+    model = read_TB_model("TB_mn3pt.npz")
     # set EF
-    model.EF = 13.43
-    model.set_E_fermis(-10,8,0.05)
+    model.EF = 16.4141#13.43#
+    model.set_E_fermis(-0.6,0.6,0.005)
     # add I calculator
     cumDOS = make_calc_inner(model,Operator=jnp.eye(model.nwan))
     model.add_calculator(cumDOS, "cumDOS")
 
     # add OHC calculator
-    matrix_all = ops.operator_matrix_all(['spd'])
-    Lz = matrix_all.pre_prepared_operators["Lz"]
-    OHC_calculator = make_calc_kubo(model,Operator=Lz)
+    #matrix_all = ops.operator_matrix_all(['spd'])
+    #Lz = matrix_all.pre_prepared_operators["Lz"]
+    # add AHC calculator
+    AHC_calculator = make_calc_kubo(model,Gamma=0.001,Operator=jnp.eye(model.nwan))
+    model.add_calculator(AHC_calculator,"AHC")
+
+    #OHC_calculator = make_calc_kubo(model,Operator=Lz)
+    # add OHC calculator
+    #OHC_calculator = make_calc_kubo(model,Operator=Lz)
     # add OHC calculator to the model
-    model.add_calculator(OHC_calculator, "OHC_xyz")
+    #model.add_calculator(OHC_calculator, "OHC_xyz")
 
     # add identity operator
     #model.add_operator_inner(jnp.eye(model.nwan), "I")
@@ -759,12 +766,12 @@ if __name__ == "__main__":
     #model.add_operator_kubo(matrix_all.pre_prepared_operators["Lz"], "Lz")
     # make k-mesh
 
-    k_mesh,kpoints = model.make_k_mesh(80,80,80)
+    k_mesh,kpoints = model.make_k_mesh(100,100,100)
     nk = kpoints.shape[0]
 
 
 
-    calculator_all = make_calc_all(model)
+    calculator_all = make_calc_all(model,kbT=0.001)
     warm_up = calculator_all(jnp.array([0.0,0.0,0.0]))
     print(f"result shape: {warm_up.shape}")
     calculator_vmap = jax.vmap(calculator_all,in_axes=(0,))
@@ -779,6 +786,6 @@ if __name__ == "__main__":
         end_idx = start_idx + batch_size
         batch_k = kpoints[start_idx:end_idx]
         result = calculator_vmap(batch_k) # batch_size * shape1 * shape2
-        results += jnp.sum(result,axis=0)
+        results += jnp.sum(result,axis=0) * model.V / nk
     
-    jnp.save("results.npy",results)
+    jnp.save("results_mn3pt.npy",results)
