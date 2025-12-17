@@ -1,4 +1,3 @@
-import re
 import jax
 import jax.numpy as jnp
 from TB_model import TB_model
@@ -22,7 +21,6 @@ levi_civita = jnp.array([
 # use functional factory to make a calculator
 # pass a dataclass because the calculator should be coupled to the model
 
-from typing import Any
 
 
 def make_k_hamiltonian_calculator(model: TB_model):
@@ -176,9 +174,9 @@ def make_calc_mag_modern(model: TB_model,gamma:int = 2,use_Pezo:bool = True):
     this gives intrinsic moment,using formula:
     M_orb(n,k) = <u(n,k)|r x v|u(n,k)>
     M_orb(n,k) = Im <∂u(n,k)/∂k|x (H_k - E_nk)|∂u(n,k)/∂k>
-               = Im sum_{q != n} 1/(E_qk-E_nk) <u_nk|vel_k|u_qk> X <u_qk|vel_k|u_nk>
+               = 0.5 * Im sum_{q != n} 1/(E_qk-E_nk) <u_nk|vel_k|u_qk> X <u_qk|vel_k|u_nk>
     M_orb(n,k,gamma) = 
-    Im sum_{q != n} 1/(E_qk-E_nk) <u_nk|vel_k[alpha]|u_qk><u_qk|vel_k[beta]|u_nk> - (alpha <-> beta)
+    Im sum_{q != n} 0.5/(E_qk-E_nk) <u_nk|vel_k[alpha]|u_qk><u_qk|vel_k[beta]|u_nk> - (alpha <-> beta)
     
     2. [Int. J. Mod. Phys. B 25, 1429 (2011)] by Niu and Thonhauser
     this gives total moment(intrinsic+itinerant),using formula:
@@ -226,28 +224,112 @@ def make_calc_mag_modern(model: TB_model,gamma:int = 2,use_Pezo:bool = True):
         v_beta = Vec_k_dagger @ velocity_k[:,:,beta] @ Vec_k
         
         Ediff = E_k[None,:] - E_k[:,None] # D[q,n] = E_qk - E_nk
-        jnp.fill_diagonal(Ediff, jnp.inf) # D[n,n] = inf, to achieve n!=m in the SUM
+        #Ediff = jnp.fill_diagonal(Ediff, jnp.inf, inplace=False) # D[n,n] = inf, to achieve n!=m in the SUM
 
         if use_Pezo:
-            Gqn = 1/(Ediff+1e-12) # 1/(E_qk-E_nk)
+            # the small imaginary part is to avoid division by zero
+            Gqn = 1/(Ediff+1e-12*1j) # 1/(E_qk-E_nk)
         else:
             numerator =  E_k[None,:] + E_k[:,None] - 2*mu # (E_qk+E_nk-2_ef)
-            denominator = Ediff**2 + 1e-12 # (E_qk-E_nk)^{2}
+            denominator = Ediff**2 + 1e-12*1j # (E_qk-E_nk)^{2},
             Gqn = numerator / denominator # (E_qk+E_nk-2_ef)/(E_qk-E_nk)^{2}
-
+        # G[q,q] = 0, to achieve n!=m in the SUM    
+        Gqn = jnp.fill_diagonal(Gqn, 0, inplace=False)
+        
         # Cross product of v and v, in direction gamma: v_alpha * v_beta - (alpha <-> beta)
-
-        # term1: sum_{q} G[q,n] * v_alpha[n,q] * v_beta[q,n]
+        # term1[n] = sum_{q} G[q,n] * v_alpha[n,q] * v_beta[q,n]
         cross_term1 = jnp.einsum("qn,nq,qn->n", Gqn, v_alpha, v_beta, optimize='optimal')
-        # term2: sum_{q} G[q,n] * v_beta[n,q] * v_alpha[q,n]
+        # alternate version:
+        # cross_term1 = jnp.sum(Gqn * v_alpha.T * v_beta, axis=0)
+
+        # term2[n] = sum_{q} G[q,n] * v_beta[n,q] * v_alpha[q,n]
         cross_term2 = jnp.einsum("qn,nq,qn->n", Gqn, v_beta, v_alpha, optimize='optimal')
+        # alternate version:
+        # cross_term2 = jnp.sum(Gqn * v_beta.T * v_alpha, axis=0)
         
         # Take the imaginary part as specified in the formula
         magnetism = jnp.imag((cross_term1 - cross_term2) / 2)
         return magnetism
     return _calculator
 
-    
+def make_calc_mag_matrix(model: TB_model, gamma:int = 2):
+    """
+    Make a calculator for the orbital magnetization matrix elements of the model.
+
+    Args:
+        model: TB_model
+            The tight-binding model class instance.
+        gamma: int, optional
+            The direction index of the magnetization (0=x, 1=y, 2=z). Default is 2 (z direction).
+
+    Returns:
+        function: A JIT-compiled function `_calculator` that computes the magnetism matrix.
+
+    References:
+        Formula based on Eq. (6) in [PHYSICAL REVIEW B 106, 104414 (2022)] by Pezo et al.
+        
+        M_orb[n,m](k, gamma) = (1/4) * Im * Sum_{q != n, m} {
+            (1 / (E_qk - E_nk)) * (v_alpha[n,q] * v_beta[q,m] - v_beta[n,q] * v_alpha[q,m]) +
+            (1 / (E_qk - E_mk)) * (v_alpha[n,q] * v_beta[q,m] - v_beta[n,q] * v_alpha[q,m])
+        }
+        where alpha, beta are determined by the Levi-Civita symbol for the given gamma.
+    """
+    nwan = model.nwan
+    alpha, beta = levi_civita[gamma]
+
+    @jax.jit
+    def _calculator(
+        E_k:jnp.ndarray,
+        Vec_k:jnp.ndarray,
+        velocity_k:jnp.ndarray,
+        ):
+        """
+        Calculate the orbital magnetization matrix for a given k-point.
+
+        Args:
+            E_k: jnp.ndarray
+                Eigenvalues of H(k), shape (nwan,). real
+            Vec_k: jnp.ndarray
+                Eigenvectors of H(k), shape (nwan, nwan). Columns are eigenvectors. complex
+            velocity_k: jnp.ndarray
+                Velocity operator in the orbital basis, shape (nwan, nwan, 3). complex
+
+        Returns:
+            jnp.ndarray: The orbital magnetization matrix, shape (nwan, nwan).
+        """
+        Vec_k_dagger = Vec_k.conj().T
+        # Transform velocity operators to the band basis: v_band = U^dagger * v_orb * U
+        v_alpha = Vec_k_dagger @ velocity_k[:,:,alpha] @ Vec_k
+        v_beta = Vec_k_dagger @ velocity_k[:,:,beta] @ Vec_k
+
+        # Calculate energy differences: Ediff[q, n] = E_q - E_n
+        Ediff = E_k[None,:] - E_k[:,None] 
+        # Set diagonal elements to infinity to avoid division by zero and effectively exclude q=n terms
+        Ediff = jnp.fill_diagonal(Ediff, jnp.inf, inplace=False) 
+
+        # G[q, n] = 1 / (E_q - E_n)
+        G = 1.0/(Ediff+1e-12*1j) 
+
+        # Part 1: Terms involving 1/(E_q - E_n)
+        # Sum_q G[q,n] * (v_alpha[n,q] * v_beta[q,m] - v_beta[n,q] * v_alpha[q,m])
+        term_G_qn = (
+        np.einsum("qn,nq,qm->nm", G, v_alpha, v_beta) - 
+        np.einsum("qn,nq,qm->nm", G, v_beta, v_alpha)
+        )
+
+        # Part 2: Terms involving 1/(E_q - E_m)
+        # Sum_q G[q,m] * (v_alpha[n,q] * v_beta[q,m] - v_beta[n,q] * v_alpha[q,m])
+        term_G_qm = (
+        np.einsum("qm,nq,qm->nm", G, v_alpha, v_beta) - 
+        np.einsum("qm,nq,qm->nm", G, v_beta, v_alpha) 
+        )
+        
+        # Combine terms: M[n,m] = (1/4) * Im(Part1 + Part2)
+        magnetism_matrix = (1/4) * jnp.imag(term_G_qn + term_G_qm)
+        return magnetism_matrix
+    return _calculator
+
+
 
 # change all calculators to a simpler form, that run one operator at a time
 def make_calc_inner(model: TB_model):
