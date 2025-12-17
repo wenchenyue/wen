@@ -25,7 +25,7 @@ class TB_model:
     # post init: calculate some useful quantities
     def __post_init__(self):
         self.EF = 0.0
-
+        self.set_E_fermis()
         self.nwan = self.HR.shape[-1] # number of wannier functions
         self.nR = self.HR.shape[0] # number of R points
         self.center_matrix = cal_center_matrix(self.center_list) # (nwan,nwan,3)
@@ -36,6 +36,7 @@ class TB_model:
         self.V = jnp.dot(b1,jnp.cross(b2,b3)) # volume of a reciprocal lattice cell
         
         # operator list
+        self.all_calculators:dict = {}
         self.O_list_inner: dict = {} # list of operators
         self.O_list_kubo: dict = {} # list of operator names   
         # calculator
@@ -58,6 +59,16 @@ class TB_model:
         self.E_fermis = jnp.arange(self.EF+E_btm,self.EF+E_top,interval)
         print(f'set E_fermis from {self.EF+E_btm:.3f} to {self.EF+E_top:.3f}, interval {interval:.3f}, {len(self.E_fermis)} levels')
          
+    def add_calculator(self, calculator: callable, name:str):
+        self.all_calculators[name] = calculator
+    
+    def clear_calculator(self):
+        '''
+        clear all calculators in the model
+        '''
+        self.all_calculators = {}
+
+
 
     def add_operator_kubo(self,operator: jnp.ndarray, name: str):
         '''

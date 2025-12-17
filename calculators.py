@@ -1,7 +1,8 @@
+
 import jax
 import jax.numpy as jnp
+from matplotlib.pyplot import sca
 from TB_model import TB_model
-from plot import Omega_array
 from utility import fermi_dirac_vamp
 
 
@@ -160,7 +161,7 @@ def make_calc_inner(model: TB_model, Operator: jnp.ndarray):
         '''
         # nwan
         inner_product = jnp.einsum('ij,jk,ki->i',Vec_k.conj().T,Operator,Vec_k, optimize='optimal')
-        return inner_product
+        return inner_product.real
     return _calculator
 
 # modern theory of orbital magnetism
@@ -438,9 +439,75 @@ def make_calc_kubo(
         return -2 * jnp.imag(Omega_array)
     return _calculator
 
+def make_calc_all(model:TB_model,
+                kbT:float=0.026, # room temperature
+                use_A:bool=False,
+                ):
+    '''
+    make a function to run a calculator for a list of k-points
+    param model: TB_model, # the model class
+    return: _calculator: function, # a function to run all calculator for a k-point
+    '''        
+    nwan = model.nwan
+    all_calculators_name = list(model.all_calculators.keys())
+    all_calculators_func = list(model.all_calculators.values())
+
+    shape1 = len(all_calculators_name) + 1
+    if len(all_calculators_name) == 0:
+        print("no calculator found, calculate energy only")
+        calculator_Hk = make_k_hamiltonian_calculator(model)
+    else:
+        print(f"calculate the following {shape1-1} calculators: {all_calculators_name}")
+        calculator_Hk = make_k_hamiltonian_velocity_calculator(model,use_A)
+    
+    if kbT >1e-9:
+        scan = True
+        print(f"calculate the fermi scan with kbT = {kbT}")
+        E_fermis = model.E_fermis
+        shape2 = len(E_fermis)
+    else: 
+        scan = False
+        print("no fermi scan, output all bands")
+
+
+    #jit here
+    @jax.jit
+    def _calculator(k:jnp.ndarray):
+        '''
+        calculate all calculators for a k-point
+        para:
+            k: jnp.ndarray, # 3, k-point in reciprocal space
+        return:
+            results: jnp.ndarray, # shape (1+n_calculators, n_fermi(or n_band)), 
+            results of all calculators
+        '''
+        # n_calc+1 * nwan
+        result_bands = jnp.zeros((shape1, nwan), dtype=default_type_real)
+        if shape1 == 1:
+            Hk = calculator_Hk(k)
+            E_k = jnp.linalg.eigvalsh(Hk) #nwan
+            result_bands = result_bands.at[0].set(E_k)
+        else:
+            Hk, velocity_k = calculator_Hk(k)
+            E_k,Vec_k = jnp.linalg.eigh(Hk)
+            result_bands = result_bands.at[0].set(E_k)
+            for i, func in enumerate(all_calculators_func):
+                result_bands = result_bands.at[i+1].set(func(E_k,Vec_k,velocity_k))
+        
+        if not scan:
+            return result_bands
+        else:
+            f_distribution = fermi_dirac_vamp(E_k,E_fermis,kbT) # nwan * len(E_fermis)
+            result_scan = result_bands[:,:,None] * f_distribution[None,:,:] # n_calc+1 * nwan * len(E_fermis)
+            return jnp.sum(result_scan,axis=1) # n_calc+1 * len(E_fermis),sum over nwan
+    return _calculator
+
+
+
 
 # change all calculators to a simpler form, that run one operator at a time
-def make_calc_inner2(model: TB_model):
+#  deprecated code start
+def make_calc_inner_deprecated(model: TB_model):
     '''
     make a calculator for the inner product of the operators
     param:
@@ -493,7 +560,7 @@ def make_calc_inner2(model: TB_model):
 
 
 
-def make_calc_kubo2(
+def make_calc_kubo_deprecated(
     model: TB_model,
     alpha:int = 0,#1st direction of kubo formula
     beta:int  = 1,#2nd direction of kubo formula
@@ -575,7 +642,7 @@ def make_calc_kubo2(
 
 
         
-def make_calc_all(model:TB_model,
+def make_calc_all_deprecated(model:TB_model,
                 alpha:int=0,
                 beta:int=1,
                 Gamma:float=0.025,
@@ -658,6 +725,8 @@ def make_calc_all(model:TB_model,
         
         return result
     return _calculator
+#  Deprecated code end
+
 
 # Calculators==================End
 
@@ -673,11 +742,23 @@ if __name__ == "__main__":
     # set EF
     model.EF = 13.43
     model.set_E_fermis(-10,8,0.05)
-    # add identity operator
-    model.add_operator_inner(jnp.eye(model.nwan), "I")
+    # add I calculator
+    cumDOS = make_calc_inner(model,Operator=jnp.eye(model.nwan))
+    model.add_calculator(cumDOS, "cumDOS")
+
+    # add OHC calculator
     matrix_all = ops.operator_matrix_all(['spd'])
-    model.add_operator_kubo(matrix_all.pre_prepared_operators["Lz"], "Lz")
+    Lz = matrix_all.pre_prepared_operators["Lz"]
+    OHC_calculator = make_calc_kubo(model,Operator=Lz)
+    # add OHC calculator to the model
+    model.add_calculator(OHC_calculator, "OHC_xyz")
+
+    # add identity operator
+    #model.add_operator_inner(jnp.eye(model.nwan), "I")
+    #matrix_all = ops.operator_matrix_all(['spd'])
+    #model.add_operator_kubo(matrix_all.pre_prepared_operators["Lz"], "Lz")
     # make k-mesh
+
     k_mesh,kpoints = model.make_k_mesh(80,80,80)
     nk = kpoints.shape[0]
 
