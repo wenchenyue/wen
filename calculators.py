@@ -203,7 +203,7 @@ def make_calc_mag_modern(model: TB_model,gamma:int = 2,use_Pezo:bool = True):
     mu = model.EF
     nwan = model.nwan
     print(f"modern theory of orbital magnetism")
-    print(f"calculate {'intrinsic' if use_Pezo else 'intrinsic and itinerant'} moment")
+    print(f"calculate {'intrinsic' if use_Pezo else 'intrinsic and itinerant'} moment, with EF = {mu}")
     alpha, beta = levi_civita[gamma]
 
 
@@ -237,7 +237,7 @@ def make_calc_mag_modern(model: TB_model,gamma:int = 2,use_Pezo:bool = True):
             denominator = Ediff**2 + 1e-12 # (E_qk-E_nk)^{2},
             Gqn = numerator / denominator # (E_qk+E_nk-2_ef)/(E_qk-E_nk)^{2}
         # G[q,q] = 0, to achieve n!=m in the SUM    
-        Gqn = jnp.fill_diagonal(Gqn, 0, inplace=False)
+        Gqn = jnp.fill_diagonal(Gqn, 0.0, inplace=False)
         
         # Cross product of v and v, in direction gamma: v_alpha * v_beta - (alpha <-> beta)
         # term1[n] = sum_{q} G[q,n] * v_alpha[n,q] * v_beta[q,n]
@@ -248,10 +248,13 @@ def make_calc_mag_modern(model: TB_model,gamma:int = 2,use_Pezo:bool = True):
         # term2[n] = sum_{q} G[q,n] * v_beta[n,q] * v_alpha[q,n]
         cross_term2 = jnp.einsum("qn,nq,qn->n", Gqn, v_beta, v_alpha, optimize='optimal')
         # alternate version:
-        # cross_term2 = jnp.sum(Gqn * v_beta.T * v_alpha, axis=0)
+        #cross_term2 = jnp.sum(Gqn * v_beta.T * v_alpha, axis=0)
         
         # Take the imaginary part as specified in the formula
         magnetism = jnp.imag((cross_term1 - cross_term2) / 2)
+
+        # using fact that cross_term2 is cross_term1.conj()
+        magnetism = jnp.imag(cross_term1)
         return magnetism
     return _calculator
 
@@ -524,8 +527,13 @@ if __name__ == "__main__":
 
 
     # add AHC calculator
-    AHC_calculator = make_calc_kubo(model,Gamma=0.001,Operator=None)
-    model.add_calculator(AHC_calculator,"AHC")
+    AHC_calculator = make_calc_kubo(model,Gamma=0.003,Operator=None)
+    model.add_calculator(AHC_calculator,"AHC_z")
+    AHC_calculator = make_calc_kubo(model,alpha=1,beta=2,Gamma=0.003,Operator=None)
+    model.add_calculator(AHC_calculator,"AHC_x")
+    AHC_calculator = make_calc_kubo(model,alpha=2,beta=0,Gamma=0.003,Operator=None)
+    model.add_calculator(AHC_calculator,"AHC_y")
+
 
     # add morb calculator
     morb_calculator = make_calc_mag_modern(model,use_Pezo=False)
@@ -537,46 +545,21 @@ if __name__ == "__main__":
     morb_calculator = make_calc_mag_modern(model,gamma=1,use_Pezo=False)
     model.add_calculator(morb_calculator,"morb_Ly")
 
-    # add ACA morb
-    matrix_all = ops.operator_matrix_all(['spd'])
-    Lz = matrix_all.pre_prepared_operators["Lz"]
-    ACA_morb_calculator = make_calc_inner(model,Operator=Lz)
-    model.add_calculator(ACA_morb_calculator,"ACA_Lz")
 
-    Lx = matrix_all.pre_prepared_operators["Lx"]
-    ACA_morb_calculator = make_calc_inner(model,Operator=Lx)
-    model.add_calculator(ACA_morb_calculator,"ACA_Lx")
-
-
-
-    # add OHC calculator
-    #matrix_all = ops.operator_matrix_all(['spd'])
-    #Lz = matrix_all.pre_prepared_operators["Lz"]
-    #OHC_calculator = make_calc_kubo(model,Operator=Lz)
-    # add OHC calculator
-    #OHC_calculator = make_calc_kubo(model,Operator=Lz)
-    # add OHC calculator to the model
-    #model.add_calculator(OHC_calculator, "OHC_xyz")
-
-    # add identity operator
-    #model.add_operator_inner(jnp.eye(model.nwan), "I")
-    #matrix_all = ops.operator_matrix_all(['spd'])
-    #model.add_operator_kubo(matrix_all.pre_prepared_operators["Lz"], "Lz")
-    # make k-mesh
 
     k_mesh,kpoints = model.make_k_mesh(100*2,100*2,100*2)
     nk = kpoints.shape[0]
 
 
 
-    calculator_all = make_calc_all(model,kbT=0.001)
+    calculator_all = make_calc_all(model,kbT=0.003,use_A=False)
     warm_up = calculator_all(jnp.array([0.0,0.0,0.0]))
     print(f"result shape: {warm_up.shape}")
-    calculator_vmap = jax.vmap(calculator_all,in_axes=(0,))
+    calculator_vmap = jax.jit(jax.vmap(calculator_all,in_axes=(0,)))
 
     results = jnp.zeros(warm_up.shape,device=jax.devices("cpu")[0],dtype=default_type_real)
 
-    batch_size = 100
+    batch_size = 200
     batch_num = nk // batch_size
 
     for i in trange(batch_num):
