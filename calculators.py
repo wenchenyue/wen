@@ -318,15 +318,15 @@ def make_calc_mag_matrix(model: TB_model, gamma:int = 2):
         # Part 1: Terms involving 1/(E_q - E_n)
         # Sum_q G[q,n] * (v_alpha[n,q] * v_beta[q,m] - v_beta[n,q] * v_alpha[q,m])
         term_G_qn = (
-        np.einsum("qn,nq,qm->nm", G, v_alpha, v_beta) - 
-        np.einsum("qn,nq,qm->nm", G, v_beta, v_alpha)
+        jnp.einsum("qn,nq,qm->nm", G, v_alpha, v_beta) - 
+        jnp.einsum("qn,nq,qm->nm", G, v_beta, v_alpha)
         )
 
         # Part 2: Terms involving 1/(E_q - E_m)
         # Sum_q G[q,m] * (v_alpha[n,q] * v_beta[q,m] - v_beta[n,q] * v_alpha[q,m])
         term_G_qm = (
-        np.einsum("qm,nq,qm->nm", G, v_alpha, v_beta) - 
-        np.einsum("qm,nq,qm->nm", G, v_beta, v_alpha) 
+        jnp.einsum("qm,nq,qm->nm", G, v_alpha, v_beta) - 
+        jnp.einsum("qm,nq,qm->nm", G, v_beta, v_alpha) 
         )
         
         # Combine terms: M[n,m] = (1/4) * Im(Part1 + Part2)
