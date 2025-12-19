@@ -1,5 +1,6 @@
 
 from math import gamma
+import operator
 import jax
 import jax.numpy as jnp
 from matplotlib.pyplot import sca
@@ -61,6 +62,36 @@ def make_k_hamiltonian_calculator(model: TB_model):
     return _calculator
 
 
+# may be useful to calculate the AA_k in  Wannier gauge
+def make_calc_AA_k(model: TB_model):
+    cell_center = model.cell_center
+    center_matrix = model.center_matrix
+    AA_R = model.AA_R
+
+    @jax.jit
+    def _calculator(k:jnp.ndarray):
+        '''
+        calculate the anomalous position operator in k space(wannier gauge)
+        para:
+            k: jnp.ndarray, # 3
+        return:
+            AA_k: jnp.ndarray, # nwan * nwan * 3
+        '''
+        # calculate the phase factor for each R
+        # This phase is caused by the diffrent position of the cell center
+        dot_product = jnp.einsum('ij,j->i', cell_center, k)
+        Phase_R = jnp.exp(1j * dot_product) # nR
+        partial_sum = jnp.einsum('i,ijkl->jkl', Phase_R, AA_R)
+        
+        dot_product = jnp.einsum('ijk,k->ij', center_matrix, k)
+        Phase_W = jnp.exp(1j * dot_product) # nwan * nwan
+        
+
+        AA_k = partial_sum * Phase_W[:,:,None]
+        AA_k = (AA_k + AA_k.transpose(1, 0, 2).conj()) / 2 # make sure the AA_k is hermitian
+        return AA_k
+    return _calculator
+
 # a calculator for the velocity of the hamiltonian with respect to k
 # it should be coupled, so just pass the model class
 def make_k_hamiltonian_velocity_calculator(model: TB_model,use_A:bool=False):
@@ -72,6 +103,7 @@ def make_k_hamiltonian_velocity_calculator(model: TB_model,use_A:bool=False):
 
     if use_A:
         print("Anomalous position term is used")
+        AA_k_calc = make_calc_AA_k(model)
     else:
         print("Anomalous position term is not used,use partial only")
 
@@ -111,17 +143,18 @@ def make_k_hamiltonian_velocity_calculator(model: TB_model,use_A:bool=False):
                             Phase_W, 
                             center_matrix)  
         Hk_derivative = 1j*(part1 + part2)
-
         if use_A:
             # A_{mn}(k) = -i ( <R|A|R>_{mn} - <R|A|R>_{nm}^* )
-            partial_sum = jnp.einsum('i,ijkl->jkl', Phase_R, AA_R)
-            temp = (partial_sum + partial_sum.transpose(1, 0, 2).conj()) / 2
-            A_term = -1j * (jnp.einsum('ijl,jk->ikl',temp,Hk) - jnp.einsum('ij,jkl->ikl',Hk,temp))
+            AA_k = AA_k_calc(k)
+            A_term = 1j * (jnp.einsum('ijl,jk->ikl',AA_k,Hk) - jnp.einsum('ij,jkl->ikl',Hk,AA_k))
             velocity_k = Hk_derivative + A_term
         else:
             velocity_k = Hk_derivative
+        velocity_k = (velocity_k + velocity_k.transpose(1,0,2).conj()) / 2
         return Hk,velocity_k    
     return _calculator
+
+
 
 # one operator
 def make_calc_inner(model: TB_model, Operator: jnp.ndarray):
@@ -185,9 +218,9 @@ def make_calc_mag_modern(model: TB_model,gamma:int = 2,use_Pezo:bool = True):
     this gives total moment(intrinsic+itinerant),using formula:
     M_orb(n,k)= ∂(E)/∂B
     M_orb(n,k) = Im <∂u(n,k)/∂k|x (H_k+E_nk-2_ef)|∂u(n,k)/∂k>
-    M_orb(n,k) = Im sum_{q != n} (E_qk+E_nk-2_ef)/(E_qk-E_nk)^{2} <u_nk|vel_k|u_qk> X <u_qk|vel_k|u_nk>
+    M_orb(n,k) = 0.5 * Im sum_{q != n} (E_qk+E_nk-2_ef)/(E_qk-E_nk)^{2} <u_nk|vel_k|u_qk> X <u_qk|vel_k|u_nk>
      M_orb(n,k,gamma) = 
-                    Im sum_{q != n} (E_qk+E_nk-2_ef)/(E_qk-E_nk)^{2} <u_nk|vel_k[alpha]|u_qk><u_qk|vel_k[beta]|u_nk> - (alpha <-> beta)
+                0.5 * Im sum_{q != n} (E_qk+E_nk-2_ef)/(E_qk-E_nk)^{2} <u_nk|vel_k[alpha]|u_qk><u_qk|vel_k[beta]|u_nk> - (alpha <-> beta)
 
     param:
         model: TB_model, # the model data class
@@ -517,15 +550,20 @@ if __name__ == "__main__":
     import operators as ops
     from tqdm import trange
 
-    model = read_TB_model("TB_Fe.npz")
+    model = read_TB_model("TB_Cu.npz")
     # set EF
-    model.EF = 12.4712#13.43#
+    model.EF = 13.43 #Cu:13.43  Fe:12.4712
     model.set_E_fermis(-0.6,0.6,0.005)
     # add I calculator
     cumDOS = make_calc_inner(model,Operator=jnp.eye(model.nwan))
     model.add_calculator(cumDOS, "cumDOS")
 
+    ops_all = ops.operator_matrix_all(['spd'])
+    Lz = ops_all.pre_prepared_operators['Lz']
+    calc_Lz_OHC = make_calc_kubo(model,Gamma=0.003,Operator=Lz)
+    model.add_calculator(calc_Lz_OHC,"Lz_OHC")
 
+    '''
     # add AHC calculator
     AHC_calculator = make_calc_kubo(model,Gamma=0.003,Operator=None)
     model.add_calculator(AHC_calculator,"AHC_z")
@@ -544,15 +582,15 @@ if __name__ == "__main__":
 
     morb_calculator = make_calc_mag_modern(model,gamma=1,use_Pezo=False)
     model.add_calculator(morb_calculator,"morb_Ly")
+    '''
 
 
-
-    k_mesh,kpoints = model.make_k_mesh(100*2,100*2,100*2)
+    k_mesh,kpoints = model.make_k_mesh(100,100,100)
     nk = kpoints.shape[0]
 
 
 
-    calculator_all = make_calc_all(model,kbT=0.003,use_A=False)
+    calculator_all = make_calc_all(model,kbT=0.003,use_A=True)
     warm_up = calculator_all(jnp.array([0.0,0.0,0.0]))
     print(f"result shape: {warm_up.shape}")
     calculator_vmap = jax.jit(jax.vmap(calculator_all,in_axes=(0,)))
@@ -569,4 +607,4 @@ if __name__ == "__main__":
         result = calculator_vmap(batch_k) # batch_size * shape1 * shape2
         results += jnp.sum(result,axis=0) * model.V / nk
     
-    jnp.save("results_Fe.npy",results)
+    jnp.save("results_Cu.npy",results)
