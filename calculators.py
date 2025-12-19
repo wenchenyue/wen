@@ -552,14 +552,14 @@ if __name__ == "__main__":
 
     model = read_TB_model("TB_Cu.npz")
     # set EF
-    model.EF = 13.43 #Cu:13.43  Fe:12.4712
+    model.EF = 12.43 #Cu:12.43  Fe:12.4712
     model.set_E_fermis(-0.6,0.6,0.005)
     # add I calculator
     cumDOS = make_calc_inner(model,Operator=jnp.eye(model.nwan))
     model.add_calculator(cumDOS, "cumDOS")
 
     ops_all = ops.operator_matrix_all(['spd'])
-    Lz = ops_all.pre_prepared_operators['Lz']
+    Lz = ops_all.pre_prepared_operators['Sz']
     calc_Lz_OHC = make_calc_kubo(model,Gamma=0.003,Operator=Lz)
     model.add_calculator(calc_Lz_OHC,"Lz_OHC")
 
@@ -590,7 +590,7 @@ if __name__ == "__main__":
 
 
 
-    calculator_all = make_calc_all(model,kbT=0.003,use_A=True)
+    calculator_all = make_calc_all(model,kbT=0.003,use_A=False)
     warm_up = calculator_all(jnp.array([0.0,0.0,0.0]))
     print(f"result shape: {warm_up.shape}")
     calculator_vmap = jax.jit(jax.vmap(calculator_all,in_axes=(0,)))
