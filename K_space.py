@@ -3,6 +3,7 @@ import jax
 import jax.numpy as jnp
 from TB_model import TB_model
 
+
 # using double precision
 jax.config.update("jax_enable_x64", True)
 # K space==============================BEGIN
@@ -14,7 +15,7 @@ def build_k_path(model:TB_model,
     """
     build k path for given model
     param model: TB model
-    param k_points: k points, shape (n_kpoints,3)
+    param k_points: k points, shape (n_kpoints,3), in relative coordinate
     param ticks_label: label for each tick, shape (n_kpoints,)
     param length: number of k points per path segment 
     it is a fix value so x coordinate of each k point is not evenly spaced
@@ -23,6 +24,8 @@ def build_k_path(model:TB_model,
     # check k_points shape
     if k_points.shape[1] != 3:
         raise ValueError("k_points shape must be (n_kpoints,3)")
+    
+    k_points = jnp.dot(k_points,model.recip_lattice)
     n_path = k_points.shape[0] - 1
     if n_path < 1:
         raise ValueError("k_points must have at least 2 points")
