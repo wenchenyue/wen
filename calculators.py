@@ -1,9 +1,7 @@
 
-from math import gamma
-import operator
+
 import jax
 import jax.numpy as jnp
-from matplotlib.pyplot import sca
 from TB_model import TB_model
 from utility import fermi_dirac_vamp
 
@@ -146,7 +144,7 @@ def make_k_hamiltonian_velocity_calculator(model: TB_model,use_A:bool=False):
         if use_A:
             # A_{mn}(k) = -i ( <R|A|R>_{mn} - <R|A|R>_{nm}^* )
             AA_k = AA_k_calc(k)
-            A_term = 1j * (jnp.einsum('ijl,jk->ikl',AA_k,Hk) - jnp.einsum('ij,jkl->ikl',Hk,AA_k))
+            A_term = -1j * (jnp.einsum('ijl,jk->ikl',AA_k,Hk) - jnp.einsum('ij,jkl->ikl',Hk,AA_k))
             velocity_k = Hk_derivative + A_term
         else:
             velocity_k = Hk_derivative
@@ -259,14 +257,14 @@ def make_calc_mag_modern(model: TB_model,gamma:int = 2,use_Pezo:bool = True):
         v_alpha = Vec_k_dagger @ velocity_k[:,:,alpha] @ Vec_k
         v_beta = Vec_k_dagger @ velocity_k[:,:,beta] @ Vec_k
         
-        Ediff = E_k[None,:] - E_k[:,None] # D[q,n] = E_qk - E_nk
+        Ediff = E_k[:,None] - E_k[None,:] # D[q,n] = E_qk - E_nk
         #Ediff = jnp.fill_diagonal(Ediff, jnp.inf, inplace=False) # D[n,n] = inf, to achieve n!=m in the SUM
 
         if use_Pezo:
             # the small imaginary part is to avoid division by zero
             Gqn = 1/(Ediff+1e-12*1j) # 1/(E_qk-E_nk)
         else:
-            numerator =  E_k[None,:] + E_k[:,None] - 2*mu # (E_qk+E_nk-2_ef)
+            numerator =  E_k[:,None] + E_k[None,:] - 2*mu # (E_qk+E_nk-2_ef)
             denominator = Ediff**2 + 1e-12 # (E_qk-E_nk)^{2},
             Gqn = numerator / denominator # (E_qk+E_nk-2_ef)/(E_qk-E_nk)^{2}
         # G[q,q] = 0, to achieve n!=m in the SUM    
@@ -284,11 +282,11 @@ def make_calc_mag_modern(model: TB_model,gamma:int = 2,use_Pezo:bool = True):
         #cross_term2 = jnp.sum(Gqn * v_beta.T * v_alpha, axis=0)
         
         # Take the imaginary part as specified in the formula
-        magnetism = jnp.imag((cross_term1 - cross_term2) / 2)
+        # magnetism = jnp.imag((cross_term1 - cross_term2) / 2)
 
         # using fact that cross_term2 is cross_term1.conj()
         magnetism = jnp.imag(cross_term1)
-        return magnetism
+        return magnetism * -1
     return _calculator
 
 def make_calc_mag_matrix(model: TB_model, gamma:int = 2):
@@ -341,7 +339,7 @@ def make_calc_mag_matrix(model: TB_model, gamma:int = 2):
         v_beta = Vec_k_dagger @ velocity_k[:,:,beta] @ Vec_k
 
         # Calculate energy differences: Ediff[q, n] = E_q - E_n
-        Ediff = E_k[None,:] - E_k[:,None] 
+        Ediff = E_k[:,None] - E_k[None,:] 
         # Set diagonal elements to infinity to avoid division by zero and effectively exclude q=n terms
         Ediff = jnp.fill_diagonal(Ediff, jnp.inf, inplace=False) 
 
@@ -440,7 +438,7 @@ def make_calc_kubo(
 
         # Calculate the energy denominator factor with Lorentzian broadening
         # denominator[n, m] = (E_n - E_m)^2 + Gamma^2
-        denominator = (E_k[None,:] - E_k[:,None])**2 + Gamma**2 + 1e-12
+        denominator = (E_k[:,None] - E_k[None,:])**2 + Gamma**2 + 1e-12
         
         # G[n, m] = 1 / ((E_n - E_m)^2 + Gamma^2)
         # We exclude diagonal elements (n=m) by setting them to 0.0, as they don't contribute to interband transitions
@@ -552,14 +550,14 @@ if __name__ == "__main__":
 
     model = read_TB_model("TB_Cu.npz")
     # set EF
-    model.EF = 12.43 #Cu:12.43  Fe:12.4712
-    model.set_E_fermis(-0.6,0.6,0.005)
+    model.EF = 13.43 #Cu:13.43  Fe:12.4712
+    model.set_E_fermis(-10,8,0.05)
     # add I calculator
     cumDOS = make_calc_inner(model,Operator=jnp.eye(model.nwan))
     model.add_calculator(cumDOS, "cumDOS")
 
     ops_all = ops.operator_matrix_all(['spd'])
-    Lz = ops_all.pre_prepared_operators['Sz']
+    Lz = ops_all.pre_prepared_operators['Lz']
     calc_Lz_OHC = make_calc_kubo(model,Gamma=0.003,Operator=Lz)
     model.add_calculator(calc_Lz_OHC,"Lz_OHC")
 
@@ -585,12 +583,12 @@ if __name__ == "__main__":
     '''
 
 
-    k_mesh,kpoints = model.make_k_mesh(100,100,100)
+    k_mesh,kpoints = model.make_k_mesh(80,80,80)
     nk = kpoints.shape[0]
 
 
 
-    calculator_all = make_calc_all(model,kbT=0.003,use_A=False)
+    calculator_all = make_calc_all(model,kbT=0.003,use_A=True)
     warm_up = calculator_all(jnp.array([0.0,0.0,0.0]))
     print(f"result shape: {warm_up.shape}")
     calculator_vmap = jax.jit(jax.vmap(calculator_all,in_axes=(0,)))
