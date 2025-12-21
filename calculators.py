@@ -282,11 +282,11 @@ def make_calc_mag_modern(model: TB_model,gamma:int = 2,use_Pezo:bool = True):
         #cross_term2 = jnp.sum(Gqn * v_beta.T * v_alpha, axis=0)
         
         # Take the imaginary part as specified in the formula
-        # magnetism = jnp.imag((cross_term1 - cross_term2) / 2)
+        magnetism = jnp.imag((cross_term1 - cross_term2) / 2)
 
         # using fact that cross_term2 is cross_term1.conj()
-        magnetism = jnp.imag(cross_term1)
-        return magnetism * -1
+        # magnetism = jnp.imag(cross_term1)
+        return magnetism 
     return _calculator
 
 def make_calc_mag_matrix(model: TB_model, gamma:int = 2):
