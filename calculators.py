@@ -1,6 +1,7 @@
 
 
 import jax
+from jax.lax import scan
 import jax.numpy as jnp
 from TB_model import TB_model
 from utility import fermi_dirac_vamp
@@ -219,6 +220,9 @@ def make_calc_mag_modern(model: TB_model,gamma:int = 2,use_Pezo:bool = True):
     M_orb(n,k) = 0.5 * Im sum_{q != n} (E_qk+E_nk-2_ef)/(E_qk-E_nk)^{2} <u_nk|vel_k|u_qk> X <u_qk|vel_k|u_nk>
      M_orb(n,k,gamma) = 
                 0.5 * Im sum_{q != n} (E_qk+E_nk-2_ef)/(E_qk-E_nk)^{2} <u_nk|vel_k[alpha]|u_qk><u_qk|vel_k[beta]|u_nk> - (alpha <-> beta)
+    this calculator only return 1st term of the magnetism,i.e.
+    0.5 * Im sum_{q != n} (E_qk+E_nk)/(E_qk-E_nk)^{2} <u_nk|vel_k[alpha]|u_qk><u_qk|vel_k[beta]|u_nk> - (alpha <-> beta)
+    NO E_F HERE !!!!!!    
 
     param:
         model: TB_model, # the model data class
@@ -235,6 +239,8 @@ def make_calc_mag_modern(model: TB_model,gamma:int = 2,use_Pezo:bool = True):
     nwan = model.nwan
     print(f"modern theory of orbital magnetism")
     print(f"calculate {'intrinsic' if use_Pezo else 'intrinsic and itinerant'} moment, with EF = {mu}")
+    if not use_Pezo:
+        print("caution: only calculate the mu-indepandent part")
     alpha, beta = levi_civita[gamma]
 
 
@@ -264,9 +270,9 @@ def make_calc_mag_modern(model: TB_model,gamma:int = 2,use_Pezo:bool = True):
             # the small imaginary part is to avoid division by zero
             Gqn = 1/(Ediff+1e-12*1j) # 1/(E_qk-E_nk)
         else:
-            numerator =  E_k[:,None] + E_k[None,:] - 2*mu # (E_qk+E_nk-2_ef)
+            numerator =  E_k[:,None] + E_k[None,:]  # (E_qk+E_nk)
             denominator = Ediff**2 + 1e-12 # (E_qk-E_nk)^{2},
-            Gqn = numerator / denominator # (E_qk+E_nk-2_ef)/(E_qk-E_nk)^{2}
+            Gqn = numerator / denominator # (E_qk+E_nk)/(E_qk-E_nk)^{2}
         # G[q,q] = 0, to achieve n!=m in the SUM    
         Gqn = jnp.fill_diagonal(Gqn, 0.0, inplace=False)
         
@@ -538,6 +544,98 @@ def make_calc_all(model:TB_model,
     return _calculator
 
 
+def make_calc_mag_modern_split(model: TB_model, gamma: int = 2):
+    # ... setup code ...
+    alpha, beta = levi_civita[gamma]
+
+    def _calculator(E_k, Vec_k, velocity_k):
+        # ... standard setup ...
+        Ediff = E_k[:,None] - E_k[None,:]
+        denominator = Ediff**2 + 1e-12 
+        
+        # --- Part A: The Energy Dependent Term ---
+        # Numerator = E_q + E_n
+        num_A = E_k[None,:] + E_k[:,None] 
+        Gqn_A = num_A / denominator
+        Gqn_A = jnp.fill_diagonal(Gqn_A, 0.0, inplace=False)
+        
+        # --- Part B: The Constant Term (Berry-like) ---
+        # Numerator = 1
+        Gqn_B = 1.0 / denominator
+        Gqn_B = jnp.fill_diagonal(Gqn_B, 0.0, inplace=False)
+
+        # Calculate Cross Products (Same as before)
+        v_alpha = Vec_k.conj().T @ velocity_k[:,:,alpha] @ Vec_k
+        v_beta = Vec_k.conj().T @ velocity_k[:,:,beta] @ Vec_k
+        
+        # We need Im[ sum G * v_a * v_b ]
+        # Compute the cross product part common to both
+        # Note: Depending on your memory, calculating the cross matrix once is better
+        
+        # Term A calculation
+        cross_A_1 = jnp.einsum("qn,nq,qn->n", Gqn_A, v_alpha, v_beta, optimize='optimal')
+        cross_A_2 = jnp.einsum("qn,nq,qn->n", Gqn_A, v_beta, v_alpha, optimize='optimal')
+        mag_A = jnp.imag((cross_A_1 - cross_A_2) / 2) # Factor of 1/2 from definition
+        
+        # Term B calculation
+        cross_B_1 = jnp.einsum("qn,nq,qn->n", Gqn_B, v_alpha, v_beta, optimize='optimal')
+        cross_B_2 = jnp.einsum("qn,nq,qn->n", Gqn_B, v_beta, v_alpha, optimize='optimal')
+        mag_B = jnp.imag((cross_B_1 - cross_B_2) / 2)
+
+        # Return BOTH terms
+        return mag_A, mag_B
+        
+    return _calculator
+
+def make_calc_mag_scan(model:TB_model,
+                kbT:float=0.026, # room temperature
+                use_A:bool=False,
+                gamma:int=2, # the direction of the magnetism, default is 2(z direction)
+                ):
+    '''
+    make a function to run a calculator for a list of k-points
+    param model: TB_model, # the model class
+    return: _calculator: function, # a function to run all calculator for a k-point
+    '''        
+    nwan = model.nwan
+    alpha,beta = levi_civita[gamma]
+
+    BC_calculator = make_calc_kubo(model, alpha=alpha, beta=beta,Gamma=0.0)
+    Mag_calculator = make_calc_mag_modern(model, gamma=gamma,use_Pezo=False)
+
+    mag_AB_calculator = make_calc_mag_modern_split(model, gamma=gamma)
+
+    calculator_Hk = make_k_hamiltonian_velocity_calculator(model,use_A)
+    E_fermis = model.E_fermis
+    print(f"scaning magnetism with  Emin = {E_fermis.min()},Emax = {E_fermis.max()},kbT = {kbT}")
+
+    @jax.jit
+    def _calculator(k:jnp.ndarray):
+        '''
+        calculate all calculators for a k-point
+        para:
+            k: jnp.ndarray, # 3, k-point in reciprocal space
+        return:
+            results: jnp.ndarray, # shape (1+n_calculators, n_fermi(or n_band)), 
+            results of all calculators
+        '''
+        Hk, velocity_k = calculator_Hk(k)
+        E_k,Vec_k = jnp.linalg.eigh(Hk)
+
+        BC = BC_calculator(E_k,Vec_k,velocity_k)
+        mag = Mag_calculator(E_k,Vec_k,velocity_k)
+        mag_A, mag_B = mag_AB_calculator(E_k,Vec_k,velocity_k)
+        
+        f_distribution = fermi_dirac_vamp(E_k,E_fermis,kbT) # nwan * len(E_fermis)
+
+        Term_A = f_distribution * mag_A[:,None] # nwan * len(E_fermis) -> len(E_fermis),
+
+        Term_B = f_distribution * mag_B[:,None] * E_fermis[None,:]# nwan * len(E_fermis) -> len(E_fermis),
+        
+        result_scan = Term_A - Term_B * 2 # len(E_fermis),
+
+        return jnp.sum(result_scan,axis=0) #  len(E_fermis),
+    return _calculator
 # Calculators==================End
 
 # test the calculator
@@ -548,18 +646,21 @@ if __name__ == "__main__":
     import operators as ops
     from tqdm import trange
 
-    model = read_TB_model("TB_Cu.npz")
+    model = read_TB_model("TB.npz")
     # set EF
-    model.EF = 13.43 #Cu:13.43  Fe:12.4712
-    model.set_E_fermis(-10,8,0.05)
-    # add I calculator
-    cumDOS = make_calc_inner(model,Operator=jnp.eye(model.nwan))
-    model.add_calculator(cumDOS, "cumDOS")
+    model.EF = 12.4712 #Cu:13.43  Fe:12.4712
+    model.set_E_fermis(-0.6,0.6,0.01)
 
-    ops_all = ops.operator_matrix_all(['spd'])
-    Lz = ops_all.pre_prepared_operators['Lz']
-    calc_Lz_OHC = make_calc_kubo(model,Gamma=0.003,Operator=Lz)
-    model.add_calculator(calc_Lz_OHC,"Lz_OHC")
+    mag_scan = make_calc_mag_scan(model,kbT=0.003,use_A=True,gamma=1)
+
+    # add I calculator
+    #cumDOS = make_calc_inner(model,Operator=jnp.eye(model.nwan))
+    #model.add_calculator(cumDOS, "cumDOS")
+
+    #ops_all = ops.operator_matrix_all(['spd'])
+    #Lz = ops_all.pre_prepared_operators['Lz']
+    #calc_Lz_OHC = make_calc_kubo(model,Gamma=0.003,Operator=Lz)
+    #model.add_calculator(calc_Lz_OHC,"Lz_OHC")
 
     '''
     # add AHC calculator
@@ -583,12 +684,12 @@ if __name__ == "__main__":
     '''
 
 
-    k_mesh,kpoints = model.make_k_mesh(80,80,80)
+    k_mesh,kpoints = model.make_k_mesh(150,150,150)
     nk = kpoints.shape[0]
 
 
 
-    calculator_all = make_calc_all(model,kbT=0.003,use_A=True)
+    calculator_all =  mag_scan#make_calc_all(model,kbT=0.003,use_A=True)
     warm_up = calculator_all(jnp.array([0.0,0.0,0.0]))
     print(f"result shape: {warm_up.shape}")
     calculator_vmap = jax.jit(jax.vmap(calculator_all,in_axes=(0,)))
@@ -605,4 +706,4 @@ if __name__ == "__main__":
         result = calculator_vmap(batch_k) # batch_size * shape1 * shape2
         results += jnp.sum(result,axis=0) * model.V / nk
     
-    jnp.save("results_Cu.npy",results)
+    jnp.save("results_Fe_mag_scan.npy",results)
