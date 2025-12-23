@@ -544,14 +544,35 @@ def make_calc_all(model:TB_model,
     return _calculator
 
 
-def make_calc_mag_modern_split(model: TB_model, gamma: int = 2):
-    # ... setup code ...
-    alpha, beta = levi_civita[gamma]
 
-    def _calculator(E_k, Vec_k, velocity_k):
+
+def make_calc_mag_scan(model:TB_model,
+                kbT:float=0.026, # room temperature
+                use_A:bool=False,
+                gamma:int=2, # the direction of the magnetism, default is 2(z direction)
+                ):
+    '''
+    make a function to run a calculator for a list of k-points
+    param model: TB_model, # the model class
+    return: _calculator: function, # a function to run Mag scanning for a k-point
+    '''        
+    nwan = model.nwan
+    alpha,beta = levi_civita[gamma]
+
+    #BC_calculator = make_calc_kubo(model, alpha=alpha, beta=beta,Gamma=0.0)
+    #Mag_calculator = make_calc_mag_modern(model, gamma=gamma,use_Pezo=False)
+
+    calculator_Hk = make_k_hamiltonian_velocity_calculator(model,use_A)
+    E_fermis = model.E_fermis
+    print(f"scaning magnetism with  Emin = {E_fermis.min()},Emax = {E_fermis.max()},kbT = {kbT}")
+
+    # split the magnetism calculation into two parts
+    # internal function to calculate the magnetism
+    def _split_calculator(E_k, Vec_k, velocity_k):
         # ... standard setup ...
         Ediff = E_k[:,None] - E_k[None,:]
         denominator = Ediff**2 + 1e-12 
+        Vec_k_dagger = Vec_k.conj().T
         
         # --- Part A: The Energy Dependent Term ---
         # Numerator = E_q + E_n
@@ -567,7 +588,24 @@ def make_calc_mag_modern_split(model: TB_model, gamma: int = 2):
         # Calculate Cross Products (Same as before)
         v_alpha = Vec_k.conj().T @ velocity_k[:,:,alpha] @ Vec_k
         v_beta = Vec_k.conj().T @ velocity_k[:,:,beta] @ Vec_k
-        
+        v = jnp.einsum("ij,jkm,jl->mil", Vec_k_dagger, velocity_k, Vec_k)
+
+        mag_A = jnp.zeros((3,nwan))
+        mag_B = jnp.zeros((3,nwan))
+        for gamma in  range(3):
+            alpha,beta = levi_civita[gamma]
+            cross_A_1 = jnp.einsum("qn,nq,qn->n", Gqn_A, v[alpha], v[beta], optimize='optimal')
+            cross_A_2 = jnp.einsum("qn,nq,qn->n", Gqn_A, v[beta], v[alpha], optimize='optimal')
+            mag_A_gamma = jnp.imag((cross_A_1 - cross_A_2) / 2)
+            mag_A = mag_A.at[gamma].set(mag_A_gamma)
+
+            cross_B_1 = jnp.einsum("qn,nq,qn->n", Gqn_B, v[alpha], v[beta], optimize='optimal')
+            cross_B_2 = jnp.einsum("qn,nq,qn->n", Gqn_B, v[beta], v[alpha], optimize='optimal')
+            mag_B_gamma = jnp.imag((cross_B_1 - cross_B_2) / 2)
+            mag_B = mag_B.at[gamma].set(mag_B_gamma)
+        return mag_A, mag_B # 3 * nwan
+
+
         # We need Im[ sum G * v_a * v_b ]
         # Compute the cross product part common to both
         # Note: Depending on your memory, calculating the cross matrix once is better
@@ -584,30 +622,6 @@ def make_calc_mag_modern_split(model: TB_model, gamma: int = 2):
 
         # Return BOTH terms
         return mag_A, mag_B
-        
-    return _calculator
-
-def make_calc_mag_scan(model:TB_model,
-                kbT:float=0.026, # room temperature
-                use_A:bool=False,
-                gamma:int=2, # the direction of the magnetism, default is 2(z direction)
-                ):
-    '''
-    make a function to run a calculator for a list of k-points
-    param model: TB_model, # the model class
-    return: _calculator: function, # a function to run all calculator for a k-point
-    '''        
-    nwan = model.nwan
-    alpha,beta = levi_civita[gamma]
-
-    BC_calculator = make_calc_kubo(model, alpha=alpha, beta=beta,Gamma=0.0)
-    Mag_calculator = make_calc_mag_modern(model, gamma=gamma,use_Pezo=False)
-
-    mag_AB_calculator = make_calc_mag_modern_split(model, gamma=gamma)
-
-    calculator_Hk = make_k_hamiltonian_velocity_calculator(model,use_A)
-    E_fermis = model.E_fermis
-    print(f"scaning magnetism with  Emin = {E_fermis.min()},Emax = {E_fermis.max()},kbT = {kbT}")
 
     @jax.jit
     def _calculator(k:jnp.ndarray):
@@ -616,25 +630,33 @@ def make_calc_mag_scan(model:TB_model,
         para:
             k: jnp.ndarray, # 3, k-point in reciprocal space
         return:
-            results: jnp.ndarray, # shape (1+n_calculators, n_fermi(or n_band)), 
-            results of all calculators
+            results: jnp.ndarray, # shape in (n_fermi), 
+            results of Orbit Mag scanning 
         '''
         Hk, velocity_k = calculator_Hk(k)
         E_k,Vec_k = jnp.linalg.eigh(Hk)
 
-        BC = BC_calculator(E_k,Vec_k,velocity_k)
-        mag = Mag_calculator(E_k,Vec_k,velocity_k)
-        mag_A, mag_B = mag_AB_calculator(E_k,Vec_k,velocity_k)
+
+        # 2 ways to calculate the magnetism
+
+        mag_A, mag_B = _split_calculator(E_k,Vec_k,velocity_k) # 3 * nwan
+        # alternative way to calculate the magnetism: 
+        # using existing BC and Mag calculator
+        #BC = BC_calculator(E_k,Vec_k,velocity_k)
+        #mag = Mag_calculator(E_k,Vec_k,velocity_k)
         
         f_distribution = fermi_dirac_vamp(E_k,E_fermis,kbT) # nwan * len(E_fermis)
 
-        Term_A = f_distribution * mag_A[:,None] # nwan * len(E_fermis) -> len(E_fermis),
+        Term_A = f_distribution[None,:,:] * mag_A[:,:,None] # 3 *  nwan * len(E_fermis)  
+        Term_B = f_distribution[None,:,:] * mag_B[:,:,None] * E_fermis[None,:,:]# 3 * nwan * len(E_fermis) 
+        result_scan = Term_A - Term_B * 2 # 3 *  nwan * len(E_fermis)
+        return jnp.sum(result_scan,axis=1) # 3 *  len(E_fermis),
 
-        Term_B = f_distribution * mag_B[:,None] * E_fermis[None,:]# nwan * len(E_fermis) -> len(E_fermis),
-        
-        result_scan = Term_A - Term_B * 2 # len(E_fermis),
-
-        return jnp.sum(result_scan,axis=0) #  len(E_fermis),
+        # The way that use BC_calculator and Mag_calculator
+        # Term_A = f_distribution * mag[:,None]
+        # Term_B = f_distribution * BC[:,None] * E_fermis[None,:]
+        # result_scan = Term_A + Term_B  # len(E_fermis),
+        # return jnp.sum(result_scan,axis=0) #  len(E_fermis),
     return _calculator
 # Calculators==================End
 
@@ -646,7 +668,7 @@ if __name__ == "__main__":
     import operators as ops
     from tqdm import trange
 
-    model = read_TB_model("TB.npz")
+    model = read_TB_model("TB_Fe.npz")
     # set EF
     model.EF = 12.4712 #Cu:13.43  Fe:12.4712
     model.set_E_fermis(-0.6,0.6,0.01)
