@@ -586,7 +586,7 @@ def make_calc_mag_scan(model:TB_model,
         Gqn_B = jnp.fill_diagonal(Gqn_B, 0.0, inplace=False)
 
         # Calculate Cross Products (Same as before)
-        v = jnp.einsum("ij,jkm,jl->mil", Vec_k_dagger, velocity_k, Vec_k)
+        v = jnp.einsum("ij,jkm,kl->mil", Vec_k_dagger, velocity_k, Vec_k)
 
         mag_A = jnp.zeros((3,nwan))
         mag_B = jnp.zeros((3,nwan))
