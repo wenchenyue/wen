@@ -557,7 +557,7 @@ def make_calc_mag_scan(model:TB_model,
     return: _calculator: function, # a function to run Mag scanning for a k-point
     '''        
     nwan = model.nwan
-    alpha,beta = levi_civita[gamma]
+    #alpha,beta = levi_civita[gamma]
 
     #BC_calculator = make_calc_kubo(model, alpha=alpha, beta=beta,Gamma=0.0)
     #Mag_calculator = make_calc_mag_modern(model, gamma=gamma,use_Pezo=False)
@@ -586,8 +586,6 @@ def make_calc_mag_scan(model:TB_model,
         Gqn_B = jnp.fill_diagonal(Gqn_B, 0.0, inplace=False)
 
         # Calculate Cross Products (Same as before)
-        v_alpha = Vec_k.conj().T @ velocity_k[:,:,alpha] @ Vec_k
-        v_beta = Vec_k.conj().T @ velocity_k[:,:,beta] @ Vec_k
         v = jnp.einsum("ij,jkm,jl->mil", Vec_k_dagger, velocity_k, Vec_k)
 
         mag_A = jnp.zeros((3,nwan))
@@ -648,7 +646,7 @@ def make_calc_mag_scan(model:TB_model,
         f_distribution = fermi_dirac_vamp(E_k,E_fermis,kbT) # nwan * len(E_fermis)
 
         Term_A = f_distribution[None,:,:] * mag_A[:,:,None] # 3 *  nwan * len(E_fermis)  
-        Term_B = f_distribution[None,:,:] * mag_B[:,:,None] * E_fermis[None,:,:]# 3 * nwan * len(E_fermis) 
+        Term_B = f_distribution[None,:,:] * mag_B[:,:,None] * E_fermis[None,None,:]# 3 * nwan * len(E_fermis) 
         result_scan = Term_A - Term_B * 2 # 3 *  nwan * len(E_fermis)
         return jnp.sum(result_scan,axis=1) # 3 *  len(E_fermis),
 
