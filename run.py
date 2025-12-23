@@ -12,7 +12,7 @@ default_type_complex = jnp.complex128
 default_type_real = jnp.float64
 
 def run_kps(
-              kps:jnp.ndarray,
+             kps:jnp.ndarray,
              calculator:callable,
              batch_size:int=100,
              tabulate:bool=False,
@@ -99,18 +99,23 @@ if __name__ == "__main__":
     from TB_model import TB_model
     from TB_io import read_TB_model
     import operators as ops
-    from calculators import make_calc_all
-    model = read_TB_model("TB.npz")
+    from calculators import *
+    model = read_TB_model("TB_Cu.npz")
     # set EF
     model.EF = 13.43
     model.set_E_fermis(-10,8,0.05)
     # add identity operator
-    model.add_operator_inner(jnp.eye(model.nwan), "I")
+    cumDOS = make_calc_inner(model,Operator=jnp.eye(model.nwan))
+    model.add_calculator(cumDOS,'cumDOS')
+
+
 
     # use operator "I" to create Kubo operator
     matrix_all = ops.operator_matrix_all(['spd'])
     
-    model.add_operator_kubo(matrix_all.pre_prepared_operators["Lz"], "Lz")
+    Lz = matrix_all.pre_prepared_operators['Lz']
+    calc_Lz_OHC = make_calc_kubo(model,Gamma=0.003,Operator=Lz)
+    model.add_calculator(calc_Lz_OHC,'Lz_OHC')
 
     #inner_calculator = model.make_calc_inner(kbT=0.026)
     #kubo_calculator =  model.make_calc_kubo(kbT=0.026)
@@ -127,7 +132,7 @@ if __name__ == "__main__":
                        batch_size=1000,
                        tabulate=False)
     print(res.shape)
-    jnp.save("results_scan.npy",res)
+    jnp.save("results_run.npy",res)
 
 
 
