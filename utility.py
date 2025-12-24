@@ -36,7 +36,7 @@ def cal_center_matrix(center_list):
     assert center_list.ndim == 2, "center_list must be a 2D array"  
     assert center_list.shape[1] == 3, "center_list must have shape (nwan, 3)"
     # calculate wannier center difference matrix
-    center_matrix = center_list[:, None, :] - center_list[None, :, :]
+    center_matrix = center_list[None,:, :] - center_list[:, None, :]
     return center_matrix
 
 # find EF from .scf.out or .nscf.out file

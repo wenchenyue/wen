@@ -142,6 +142,7 @@ def make_k_hamiltonian_velocity_calculator(model: TB_model,use_A:bool=False):
                             Phase_W, 
                             center_matrix)  
         Hk_derivative = 1j*(part1 + part2)
+        Hk_derivative = (Hk_derivative + Hk_derivative.transpose(1,0,2).conj()) / 2
         if use_A:
             # A_{mn}(k) = -i ( <R|A|R>_{mn} - <R|A|R>_{nm}^* )
             AA_k = AA_k_calc(k)
@@ -149,7 +150,6 @@ def make_k_hamiltonian_velocity_calculator(model: TB_model,use_A:bool=False):
             velocity_k = Hk_derivative + A_term
         else:
             velocity_k = Hk_derivative
-        velocity_k = (velocity_k + velocity_k.transpose(1,0,2).conj()) / 2
         return Hk,velocity_k    
     return _calculator
 
