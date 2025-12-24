@@ -100,39 +100,46 @@ if __name__ == "__main__":
     from TB_io import read_TB_model
     import operators as ops
     from calculators import *
-    model = read_TB_model("TB_Cu.npz")
-    # set EF
-    model.EF = 13.43
-    model.set_E_fermis(-10,8,0.05)
+    model = read_TB_model("TB.npz")
+    nwan = model.nwan
+
+    
+    model.EF = 12.471
+    model.set_E_fermis(-1.6,1.6,0.01)
     # add identity operator
-    cumDOS = make_calc_inner(model,Operator=jnp.eye(model.nwan))
-    model.add_calculator(cumDOS,'cumDOS')
+
+    mag_scan = make_calc_mag_scan(model,kbT=0.003,use_A=True)
+    #cumDOS = make_calc_inner(model,Operator=jnp.eye(model.nwan))
+    #model.add_calculator(cumDOS,'cumDOS')
 
 
 
     # use operator "I" to create Kubo operator
     matrix_all = ops.operator_matrix_all(['spd'])
     
-    Lz = matrix_all.pre_prepared_operators['Lz']
-    calc_Lz_OHC = make_calc_kubo(model,Gamma=0.003,Operator=Lz)
-    model.add_calculator(calc_Lz_OHC,'Lz_OHC')
+    Sz = matrix_all.pre_prepared_operators['Sz']
+    calc_Sz = make_calc_inner(model,Sz)
+    model.add_calculator(calc_Sz,"Sz")
+    #calc_Lz_OHC = make_calc_kubo(model,Gamma=0.003,Operator=Lz)
+    #model.add_calculator(calc_Lz_OHC,'Lz_OHC')
 
     #inner_calculator = model.make_calc_inner(kbT=0.026)
     #kubo_calculator =  model.make_calc_kubo(kbT=0.026)
-    all_calculator = make_calc_all(model)
+    all_calculator = mag_scan # make_calc_all(model,kbT=0.0003,use_A=True)
 
     # make k-mesh
-    k_mesh,k_mesh_flatten = model.make_k_mesh(100,100,100)
+    k_mesh,k_mesh_flatten = model.make_k_mesh(160,160,160)
     print(model.k_mesh.shape)
     print(k_mesh_flatten.shape)
     # run
 
+    nk = k_mesh_flatten.shape[0]
     res = run_kps(k_mesh_flatten,
                        all_calculator,
-                       batch_size=1000,
+                       batch_size=2000,
                        tabulate=False)
     print(res.shape)
-    jnp.save("results_run.npy",res)
+    jnp.save("test_noSym.npy",res * model.V / nk) 
 
 
 
