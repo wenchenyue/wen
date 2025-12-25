@@ -30,7 +30,7 @@ def cal_center_matrix(center_list):
     param center_list: wannier center list, 2D array, shape (nwan,3)
     return: wannier center difference matrix, 3D array, shape (nwan,nwan,3)
 
-    matrix[i,j] = vec[i] - vec[j]
+    matrix[i,j] = vec[j] - vec[i]
     '''
     # check input
     assert center_list.ndim == 2, "center_list must be a 2D array"  

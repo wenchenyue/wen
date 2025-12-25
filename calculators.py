@@ -199,48 +199,34 @@ def make_calc_inner(model: TB_model, Operator: jnp.ndarray):
 
 # modern theory of orbital magnetism
 
-def make_calc_mag_modern(model: TB_model,gamma:int = 2,use_Pezo:bool = True):
+def make_calc_mag_modern(model: TB_model,gamma:int = 2):
     '''
     make a calculator for the magnetism of the model
     using modern theory of orbital magnetism 
-    There are two versions of this theory:
+    Using Pezo's theory:
 
-    1. [PHYSICAL REVIEW B 106, 104414 (2022)] by  Pezo
+    [PHYSICAL REVIEW B 106, 104414 (2022)] by  Pezo
     this gives intrinsic moment,using formula:
     M_orb(n,k) = <u(n,k)|r x v|u(n,k)>
     M_orb(n,k) = Im <∂u(n,k)/∂k|x (H_k - E_nk)|∂u(n,k)/∂k>
                = 0.5 * Im sum_{q != n} 1/(E_qk-E_nk) <u_nk|vel_k|u_qk> X <u_qk|vel_k|u_nk>
     M_orb(n,k,gamma) = 
     Im sum_{q != n} 0.5/(E_qk-E_nk) <u_nk|vel_k[alpha]|u_qk><u_qk|vel_k[beta]|u_nk> - (alpha <-> beta)
-    
-    2. [Int. J. Mod. Phys. B 25, 1429 (2011)] by Niu and Thonhauser
-    this gives total moment(intrinsic+itinerant),using formula:
-    M_orb(n,k)= ∂(E)/∂B
-    M_orb(n,k) = Im <∂u(n,k)/∂k|x (H_k+E_nk-2_ef)|∂u(n,k)/∂k>
-    M_orb(n,k) = 0.5 * Im sum_{q != n} (E_qk+E_nk-2_ef)/(E_qk-E_nk)^{2} <u_nk|vel_k|u_qk> X <u_qk|vel_k|u_nk>
-     M_orb(n,k,gamma) = 
-                0.5 * Im sum_{q != n} (E_qk+E_nk-2_ef)/(E_qk-E_nk)^{2} <u_nk|vel_k[alpha]|u_qk><u_qk|vel_k[beta]|u_nk> - (alpha <-> beta)
-    this calculator only return 1st term of the magnetism,i.e.
-    0.5 * Im sum_{q != n} (E_qk+E_nk)/(E_qk-E_nk)^{2} <u_nk|vel_k[alpha]|u_qk><u_qk|vel_k[beta]|u_nk> - (alpha <-> beta)
-    NO E_F HERE !!!!!!    
+
+    This result is the same as  the diagonal part of the magnetism matrix M_orb(n,k,gamma)
 
     param:
         model: TB_model, # the model data class
         gamma: int, # the direction of the magnetism, default is 2(z direction)
-        use_Pezo: bool, # use Pezo's version or Niu's version, default is Pezo's version
     return:
-        _calculator: function, # a calculator for the magnetism of the model
+        _calculator: function, # a calculator for the  intrinsic magnetism of the model
     ---------------------------------------------------------------------------
     Formula:
     Note: velocity_k here defined with or without A term may result differently
     '''
 
-    mu = model.EF
     nwan = model.nwan
-    print(f"modern theory of orbital magnetism")
-    print(f"calculate {'intrinsic' if use_Pezo else 'intrinsic and itinerant'} moment, with EF = {mu}")
-    if not use_Pezo:
-        print("caution: only calculate the mu-indepandent part")
+    print(f"modern theory of orbital magnetism, caution: only calculate the intrinsic part")
     alpha, beta = levi_civita[gamma]
 
 
@@ -266,13 +252,9 @@ def make_calc_mag_modern(model: TB_model,gamma:int = 2,use_Pezo:bool = True):
         Ediff = E_k[:,None] - E_k[None,:] # D[q,n] = E_qk - E_nk
         #Ediff = jnp.fill_diagonal(Ediff, jnp.inf, inplace=False) # D[n,n] = inf, to achieve n!=m in the SUM
 
-        if use_Pezo:
-            # the small imaginary part is to avoid division by zero
-            Gqn = 1/(Ediff+1e-12*1j) # 1/(E_qk-E_nk)
-        else:
-            numerator =  E_k[:,None] + E_k[None,:]  # (E_qk+E_nk)
-            denominator = Ediff**2 + 1e-12 # (E_qk-E_nk)^{2},
-            Gqn = numerator / denominator # (E_qk+E_nk)/(E_qk-E_nk)^{2}
+        # the small imaginary part is to avoid division by zero
+        Gqn = 1 / (Ediff+1e-12*1j) # 1/(E_qk-E_nk)
+
         # G[q,q] = 0, to achieve n!=m in the SUM    
         Gqn = jnp.fill_diagonal(Gqn, 0.0, inplace=False)
         
