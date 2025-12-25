@@ -18,7 +18,7 @@ levi_civita = jnp.array([
     )
 
 # Calculators==================Begin
-
+# (E_k, Vec_k, velocity_k)-dependent calculators
 
 # one operator
 def make_calc_inner(model: TB_model, Operator: jnp.ndarray):
@@ -193,6 +193,9 @@ def make_calc_mag_matrix(model: TB_model, gamma:int = 2):
         v_alpha = Vec_k_dagger @ velocity_k[:,:,alpha] @ Vec_k
         v_beta = Vec_k_dagger @ velocity_k[:,:,beta] @ Vec_k
 
+        v_alpha_0 = jnp.fill_diagonal(v_alpha, 0.0, inplace=False)
+        v_beta_0 = jnp.fill_diagonal(v_beta, 0.0, inplace=False)
+
         # Calculate energy differences: Ediff[q, n] = E_q - E_n
         Ediff = E_k[:,None] - E_k[None,:] 
         # Set diagonal elements to infinity to avoid division by zero and effectively exclude q=n terms
@@ -200,24 +203,87 @@ def make_calc_mag_matrix(model: TB_model, gamma:int = 2):
 
         # G[q, n] = 1 / (E_q - E_n)
         G = 1.0/(Ediff+1e-12*1j) 
+        G = jnp.fill_diagonal(G, 0.0, inplace=False) # G[q,q] = 0, to achieve q!=n in the SUM
 
         # Part 1: Terms involving 1/(E_q - E_n)
         # Sum_q G[q,n] * (v_alpha[n,q] * v_beta[q,m] - v_beta[n,q] * v_alpha[q,m])
         term_G_qn = (
-        jnp.einsum("qn,nq,qm->nm", G, v_alpha, v_beta) - 
-        jnp.einsum("qn,nq,qm->nm", G, v_beta, v_alpha)
+        jnp.einsum("qn,nq,qm->nm", G, v_alpha_0, v_beta_0) 
+       -jnp.einsum("qn,nq,qm->nm", G, v_beta_0, v_alpha_0) 
         )
 
         # Part 2: Terms involving 1/(E_q - E_m)
         # Sum_q G[q,m] * (v_alpha[n,q] * v_beta[q,m] - v_beta[n,q] * v_alpha[q,m])
-        term_G_qm = (
-        jnp.einsum("qm,nq,qm->nm", G, v_alpha, v_beta) - 
-        jnp.einsum("qm,nq,qm->nm", G, v_beta, v_alpha) 
+        term_G_qm = ( # q!=m  and q!=n
+        jnp.einsum("qm,nq,qm->nm", G, v_alpha_0, v_beta_0) 
+       -jnp.einsum("qm,nq,qm->nm", G, v_beta_0, v_alpha_0) 
         )
         
         # Combine terms: M[n,m] = (1/4) * Im(Part1 + Part2)
         magnetism_matrix = (1/4) * jnp.imag(term_G_qn + term_G_qm)
         return magnetism_matrix
+    return _calculator
+
+def make_calc_OBC_modern(
+    model: TB_model,
+    alpha:int = 0,#1st direction of kubo formula
+    beta:int  = 1,#2nd direction of kubo formula
+    gamma:int = 2,# direction of Orbital magnetization moment
+    Gamma:float = 0.025,# smearing width,in eV unit
+    ):
+    f"""
+    Make a calculator for the Orbital Berry Curvature (OBC) of the model.
+    It is used for Orbital Hall conductivity (OHC) calculation.
+    using Modern theory of orbital magnetization.
+    Formula based on Eq. (8) and (9) in [PHYSICAL REVIEW B 106, 104414 (2022)] by Pezo et al
+   
+    O_BC[n,k,alpha,beta,gamma] =
+    -2 * Im sum_[q:m!=n] 1/(E_mk - E_nk)**2 
+     * (1/2) sum_(q) (v_alpha[n,q] * mag_gamma[q,m] + mag_gamma[n,q] * v_alpha[q,m]) 
+     * v_beta[m,n] 
+
+     Here I put the negative sign in front of the OBC, differ from the original formula.
+    """
+    nwan = model.nwan
+    mag_calculator = make_calc_mag_matrix(model, gamma)
+
+    def _calculator(
+        E_k:jnp.ndarray,
+        Vec_k:jnp.ndarray,
+        velocity_k:jnp.ndarray,
+        ):
+        """
+        Calculate the Orbital Berry Curvature for a given k-point.
+
+        Args:
+            E_k: jnp.ndarray
+                Eigenvalues of H(k), shape (nwan,). real
+            Vec_k: jnp.ndarray
+                Eigenvectors of H(k), shape (nwan, nwan). Columns are eigenvectors. complex
+            velocity_k: jnp.ndarray
+                Velocity operator in the orbital basis, shape (nwan, nwan, 3). complex
+
+        Returns:
+            jnp.ndarray: The Orbital Berry Curvature matrix, shape (nwan, nwan).
+        """
+        Vec_k_dagger = Vec_k.conj().T
+        v_alpha = Vec_k_dagger @ velocity_k[:,:,alpha] @ Vec_k
+        v_beta = Vec_k_dagger @ velocity_k[:,:,beta] @ Vec_k
+
+        # qe.(6) in Pezo et al
+        magnetism = mag_calculator(E_k, Vec_k, velocity_k)
+
+        # eq.(9) in Pezo et al
+        v_alpha_J = (1/2) * ( v_alpha @ magnetism + magnetism @ v_alpha)
+ 
+
+        Ediff2 = (E_k[:,None] - E_k[None,:])**2 + Gamma**2 + 1e-12
+        # Set diagonal elements to 0
+        G = jnp.fill_diagonal(1.0/Ediff2, 0.0, inplace=False) 
+
+        OBC = -2 * jnp.imag(jnp.einsum("nm,nm,mn->n", G, v_alpha_J, v_beta))
+
+        return OBC
     return _calculator
 
 
@@ -329,6 +395,9 @@ def make_calc_kubo(
         return -2 * jnp.imag(Omega_array)
     return _calculator
 
+
+
+# K-dependent calculators
 def make_calc_all(model:TB_model,
                 kbT:float=0.026, # room temperature
                 use_A:bool=False,
@@ -354,7 +423,7 @@ def make_calc_all(model:TB_model,
         scan = True
         print(f"calculate the fermi scan with kbT = {kbT}")
         E_fermis = model.E_fermis
-        shape2 = len(E_fermis)
+        assert model.E_fermis is not None
     else: 
         scan = False
         print("no fermi scan, output all bands")
@@ -392,48 +461,6 @@ def make_calc_all(model:TB_model,
             return jnp.sum(result_scan,axis=1) # n_calc+1 * len(E_fermis),sum over nwan
     return _calculator
 
-# testing version
-# Only for testing, not for production use
-def make_calc_mag_test(model: TB_model):
-    '''
-    make a calculator for the magnetism of the model
-    using testing version 
-    '''
-    AA_calc = make_calc_AA_k(model)
-    calculator_Hk = make_k_hamiltonian_velocity_calculator(model,use_A=False)
-    nwan = model.nwan
-
-    def _calculator(k:jnp.ndarray):
-        '''
-        calculate the magnetism of the model
-        para:
-            k: jnp.ndarray, # 3
-        return:
-            magnetism: jnp.ndarray, # nwan
-        '''
-        Hk, velocity_k = calculator_Hk(k)
-        E_k, Vec_k = jnp.linalg.eigh(Hk)
-        Vec_k_dagger = Vec_k.conj().T
-        AA_k_W = AA_calc(k)
-        #Vec_k_dagger @ AA_k_W @ Vec_k, shape (nwan,nwan,3)
-        AA_B = jnp.einsum("ij,jka,kl->ila",Vec_k_dagger,AA_k_W,Vec_k)    
-
-        Ediff = E_k[:,None] - E_k[None,:] # D[q,n] = E_qk - E_nk
-        G = Ediff / Ediff**2 + 1e-9  # nwan * nwan
-        G = jnp.fill_diagonal(G,0.0,inplace=False)
-        
-        velocity_H = jnp.einsum("ij,jka,kl->ila",Vec_k_dagger,velocity_k,Vec_k) # nwan * nwan * 3
-        D_term = 1j * G[:,:,None] * velocity_H # nwan * nwan * 3
-
-        AA_H = AA_B + D_term # nwan * nwan * 3
-        magnetism = jnp.zeros((3,nwan))
-        for gamma in  range(3):
-            alpha, beta = levi_civita[gamma]
-            temp = jnp.einsum("mn,nm,mn->n",Ediff,AA_H[:,:,alpha],AA_H[:,:,beta]).imag
-            magnetism = magnetism.at[gamma].set(temp)
-            
-        return magnetism
-    return _calculator
 
 # scanning Morb
 def make_calc_mag_scan(model:TB_model,
@@ -495,8 +522,6 @@ def make_calc_mag_scan(model:TB_model,
             mag_B = mag_B.at[gamma].set(mag_B_gamma)
         return mag_A, mag_B # 3 * nwan
 
-
-
     @jax.jit
     def _calculator(k:jnp.ndarray):
         '''
@@ -534,72 +559,53 @@ def make_calc_mag_scan(model:TB_model,
     return _calculator
 # Calculators==================End
 
+
+
+# testing version
+# Only for testing, not for production use
+def make_calc_mag_test(model: TB_model):
+    '''
+    make a calculator for the magnetism of the model
+    using testing version 
+    '''
+    AA_calc = make_calc_AA_k(model)
+    calculator_Hk = make_k_hamiltonian_velocity_calculator(model,use_A=False)
+    nwan = model.nwan
+
+    def _calculator(k:jnp.ndarray):
+        '''
+        calculate the magnetism of the model
+        para:
+            k: jnp.ndarray, # 3
+        return:
+            magnetism: jnp.ndarray, # nwan
+        '''
+        Hk, velocity_k = calculator_Hk(k)
+        E_k, Vec_k = jnp.linalg.eigh(Hk)
+        Vec_k_dagger = Vec_k.conj().T
+        AA_k_W = AA_calc(k)
+        #Vec_k_dagger @ AA_k_W @ Vec_k, shape (nwan,nwan,3)
+        AA_B = jnp.einsum("ij,jka,kl->ila",Vec_k_dagger,AA_k_W,Vec_k)    
+
+        Ediff = E_k[:,None] - E_k[None,:] # D[q,n] = E_qk - E_nk
+        G = Ediff / Ediff**2 + 1e-9  # nwan * nwan
+        G = jnp.fill_diagonal(G,0.0,inplace=False)
+        
+        velocity_H = jnp.einsum("ij,jka,kl->ila",Vec_k_dagger,velocity_k,Vec_k) # nwan * nwan * 3
+        D_term = 1j * G[:,:,None] * velocity_H # nwan * nwan * 3
+
+        AA_H = AA_B + D_term # nwan * nwan * 3
+        magnetism = jnp.zeros((3,nwan))
+        for gamma in  range(3):
+            alpha, beta = levi_civita[gamma]
+            temp = jnp.einsum("mn,nm,mn->n",Ediff,AA_H[:,:,alpha],AA_H[:,:,beta]).imag
+            magnetism = magnetism.at[gamma].set(temp)
+            
+        return magnetism
+    return _calculator
+
+
 # test the calculator
 # test pass
 if __name__ == "__main__":
-    from TB_model import TB_model
-    from TB_io import read_TB_model
-    import operators as ops
-    from tqdm import trange
-
-    model = read_TB_model("TB_Fe.npz")
-    # set EF
-    model.EF = 12.4712 #Cu:13.43  Fe:12.4712
-    model.set_E_fermis(-0.6,0.6,0.01)
-
-    mag_scan = make_calc_mag_scan(model,kbT=0.003,use_A=True,gamma=1)
-
-    # add I calculator
-    #cumDOS = make_calc_inner(model,Operator=jnp.eye(model.nwan))
-    #model.add_calculator(cumDOS, "cumDOS")
-
-    #ops_all = ops.operator_matrix_all(['spd'])
-    #Lz = ops_all.pre_prepared_operators['Lz']
-    #calc_Lz_OHC = make_calc_kubo(model,Gamma=0.003,Operator=Lz)
-    #model.add_calculator(calc_Lz_OHC,"Lz_OHC")
-
-    '''
-    # add AHC calculator
-    AHC_calculator = make_calc_kubo(model,Gamma=0.003,Operator=None)
-    model.add_calculator(AHC_calculator,"AHC_z")
-    AHC_calculator = make_calc_kubo(model,alpha=1,beta=2,Gamma=0.003,Operator=None)
-    model.add_calculator(AHC_calculator,"AHC_x")
-    AHC_calculator = make_calc_kubo(model,alpha=2,beta=0,Gamma=0.003,Operator=None)
-    model.add_calculator(AHC_calculator,"AHC_y")
-
-
-    # add morb calculator
-    morb_calculator = make_calc_mag_modern(model,use_Pezo=False)
-    model.add_calculator(morb_calculator,"morb_Lz")
-
-    morb_calculator = make_calc_mag_modern(model,gamma=0,use_Pezo=False)
-    model.add_calculator(morb_calculator,"morb_Lx")
-
-    morb_calculator = make_calc_mag_modern(model,gamma=1,use_Pezo=False)
-    model.add_calculator(morb_calculator,"morb_Ly")
-    '''
-
-
-    k_mesh,kpoints = model.make_k_mesh(150,150,150)
-    nk = kpoints.shape[0]
-
-
-
-    calculator_all =  mag_scan#make_calc_all(model,kbT=0.003,use_A=True)
-    warm_up = calculator_all(jnp.array([0.0,0.0,0.0]))
-    print(f"result shape: {warm_up.shape}")
-    calculator_vmap = jax.jit(jax.vmap(calculator_all,in_axes=(0,)))
-
-    results = jnp.zeros(warm_up.shape,device=jax.devices("cpu")[0],dtype=default_type_real)
-
-    batch_size = 200
-    batch_num = nk // batch_size
-
-    for i in trange(batch_num):
-        start_idx = i * batch_size
-        end_idx = start_idx + batch_size
-        batch_k = kpoints[start_idx:end_idx]
-        result = calculator_vmap(batch_k) # batch_size * shape1 * shape2
-        results += jnp.sum(result,axis=0) * model.V / nk
-    
-    jnp.save("results_Fe_mag_scan.npy",results)
+    pass

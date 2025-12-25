@@ -34,13 +34,13 @@ def run_kps(
     calculator_vmap = jax.vmap(calculator,in_axes=(0,))
 
     if tabulate:
-        # nk, 1 + n_operator_all, n_fermi(or n_band)
+        # nk, 1 + n_calc_all, n_fermi(or n_band)
         Results = jnp.zeros([nk,warm_up.shape[0],warm_up.shape[1]],
                              device=jax.devices("cpu")[0],dtype=default_type_real)
         # estimate memory usage
         mem_usage = nk * warm_up.size * 8 / 1024 / 1024
         print(f"Use tabulating, estimated memory usage: {mem_usage:.3f} MB")
-    else:# n_operator, n_fermi(or n_band)
+    else:# 1 + n_calc_all, n_fermi(or n_band)
         Results = jnp.zeros(warm_up.shape,device=jax.devices("cpu")[0],dtype=default_type_real)
 
     # check GPU
@@ -65,11 +65,11 @@ def run_kps(
     print(f"{batch_num} batchs,{batch_size} k-points per batch")
     print("if out of memory, try to decrease batch_size")
 
+    batch_k_set = kps.reshape([batch_num,batch_size,3])
+
     # run
     for i in trange(batch_num):
-        start_idx = i * batch_size
-        end_idx = start_idx + batch_size
-        batch_k = kps[start_idx:end_idx]
+        batch_k = batch_k_set[i]
         
         ## running step
         if gpu_num > 1:
@@ -86,7 +86,7 @@ def run_kps(
         
         ## post processing
         if tabulate:
-            Results = Results.at[start_idx:end_idx].set(result)
+            Results = Results.at[i*batch_size:(i+1)*batch_size].set(result)
         else:
             Results += jnp.sum(result,axis=0)
 
@@ -118,7 +118,8 @@ if __name__ == "__main__":
     matrix_all = ops.operator_matrix_all(['spd'])
     
     Sz = matrix_all.pre_prepared_operators['Sz']
-    calc_Sz = make_calc_inner(model,Sz)
+    
+    
     model.add_calculator(calc_Sz,"Sz")
     #calc_Lz_OHC = make_calc_kubo(model,Gamma=0.003,Operator=Lz)
     #model.add_calculator(calc_Lz_OHC,'Lz_OHC')

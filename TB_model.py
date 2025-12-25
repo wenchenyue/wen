@@ -25,7 +25,7 @@ class TB_model:
     # post init: calculate some useful quantities
     def __post_init__(self):
         self.EF = 0.0
-        self.set_E_fermis()
+        self.E_fermis = None
         self.nwan = self.HR.shape[-1] # number of wannier functions
         self.nR = self.HR.shape[0] # number of R points
         self.center_matrix = cal_center_matrix(self.center_list) # (nwan,nwan,3)
@@ -67,48 +67,7 @@ class TB_model:
         clear all calculators in the model
         '''
         self.all_calculators = {}
-
-
-
-    def add_operator_kubo(self,operator: jnp.ndarray, name: str):
-        '''
-        add an operator to the model, and check its shape
-        param O: operator matrix, shape (nwan,nwan)
-        '''
-        # check shape
-        if operator.shape != (self.nwan,self.nwan):
-            raise ValueError(f"operator {name} shape {operator.shape} not match nwan={self.nwan}")        
-        self.O_list_kubo[name] = operator
-        print (f"add operator {name} in kubo list")
-
-    def add_operator_inner(self,operator: jnp.ndarray, name: str):
-        '''
-        add an operator to the model, and check its shape
-        param O: operator matrix, shape (nwan,nwan)
-        '''
-        # check shape
-        if operator.shape != (self.nwan,self.nwan):
-            raise ValueError(f"operator {name} shape {operator.shape} not match nwan={self.nwan}")        
-        self.O_list_inner[name] = operator
-        print (f"add operator {name} in inner list")
-
-    def clear_operator(self, category: str="all"):
-        '''
-        clear all operators in the model
-        '''
-        if category == "kubo":
-            self.O_list_kubo = {}
-            print (f"clear all operators in kubo list")
-        elif category == "inner":
-            self.O_list_inner = {}
-            print (f"clear all operators in inner list")
-        elif category == "all":
-            self.O_list_kubo = {}
-            self.O_list_inner = {}
-            print (f"clear all operators in kubo list and inner list")
-        else:
-            raise ValueError(f"category {category} not supported")
-    
+   
 
     def make_k_hamiltonian_calculator(self):
         '''
@@ -126,32 +85,47 @@ class TB_model:
         from calculators import make_k_hamiltonian_velocity_calculator
         return make_k_hamiltonian_velocity_calculator(self)
     
-    def make_calc_inner(self,kbT:float=0.01):
+    def make_calc_inner(self,name:str,operator:jnp.ndarray):
         '''
         make a calculator for inner quantity
-        return: a function, which takes k as input, and return inner quantity as output
+        return: a function, which takes Vec_k as input, and return inner quantity as output
         '''
         from calculators import make_calc_inner
-        self.inner_calculator = make_calc_inner(self)
-        return self.inner_calculator    
+        self.all_calculators[name] = make_calc_inner(self,operator)
+        return self.all_calculators[name]    
     
     def make_calc_kubo(self,
+                        name:str,
                         alpha:int = 0,#1st direction of kubo formula
                         beta:int  = 1,#2nd direction of kubo formula
                         Gamma:float = 0.025,# smearing width,in eV unit
+                        Operator:jnp.ndarray = None, # default is None, then calc Berry Curvature
                        ):
         '''
         make a calculator for kubo quantity
-        return: a function, which takes k as input, and return kubo quantity as output
+        return: a function, which takes E_k, Vec_k, Vel_k as input, 
+        and return kubo quantity as output
         '''
         from calculators import make_calc_kubo
-        self.kubo_calculator = make_calc_kubo(self,alpha,beta,Gamma)
-        return self.kubo_calculator 
+        self.all_calculators[name] = make_calc_kubo(self,alpha,beta,Gamma,Operator)
+        return self.all_calculators[name] 
     
+    def make_calc_OBC(self,
+                        name:str,
+                        alpha:int = 0,#1st direction of kubo formula
+                        beta:int  = 1,#2nd direction of kubo formula
+                        gamma:int = 2,#direction of Orbital magnetization moment
+                        Gamma:float = 0.025,# smearing width,in eV unit
+                        ):
+        '''
+        make a calculator for OBC modern version
+        return: a function, which takes E_k, Vec_k, Vel_k as input, and return OBC as output
+        '''
+        from calculators import make_calc_OBC_modern
+        self.all_calculators[name] = make_calc_OBC_modern(self,alpha,beta,gamma,Gamma)
+        return self.all_calculators[name]
+
     def make_calc_all(self,
-                    alpha:int=0,
-                    beta:int=1,
-                    Gamma:float=0.025,
                     kbT:float=0.026, # room temperature
                     use_A:bool=False,
                         ):
@@ -160,8 +134,8 @@ class TB_model:
         return: a dictionary of calculators
         '''
         from calculators import make_calc_all
-        self.all_calculator = make_calc_all(self,alpha,beta,Gamma,kbT,use_A)
-        return self.all_calculator
+        self.cal_all = make_calc_all(self,kbT,use_A)
+        return self.cal_all
     
     def make_k_mesh(self,
                     nkx:int=100,
@@ -198,17 +172,11 @@ class TB_model:
         from K_space import build_k_path
         return build_k_path(self,k_points,ticks_label,length)
         
-    def run_all(self,batch_size:int=100,tabulate:bool=False):
+    def run_all(self,job_name:str,batch_size:int=100,tabulate:bool=False):
         '''
         run all calculators for given k points
         '''
-
-        res_dict = {}
-        if len(self.O_list_inner) > 0:
-            res_dict['inner'] = {}
-        if len(self.O_list_kubo) > 0:
-            res_dict['kubo'] = {}
-        
+        res_dict ={}
         if self.k_points is None:
             raise ValueError("k_points is None, please make k mesh first")
         k_points = self.k_points
@@ -216,28 +184,21 @@ class TB_model:
         V_k =self.V / nk
 
         from run import run_kps
-        res = run_kps(k_points,self.all_calculator,batch_size=batch_size,tabulate=tabulate)
-        print(res.shape)
-        res_dict['energy'] = res[0]
-        i = 1
-        for key in self.O_list_inner.keys():
+        if self.cal_all is None:
+            print("make all calculators using default parameters")
+            print("kbT = 0.026, use_A = False")
+            self.make_calc_all()
+        Results = run_kps(k_points,self.cal_all,batch_size=batch_size,tabulate=tabulate)
+        print(Results.shape)
+
+        res_dict["Energy"] = Results[0]
+        all_calculators_name = list(self.all_calculators.keys())
+        for i,name in enumerate(all_calculators_name):
             if tabulate:
-                tmp = res[:,i,:]
-                res_dict['inner'][key] = tmp.reshape([self.nkx,self.nky,self.nkz,-1])
+                res_dict[name] = Results[:,i+1:].reshape((self.nkx,self.nky,self.nkz,-1))
             else:
-                tmp = res[i,:]
-                res_dict['inner'][key] = tmp*V_k
-            i += 1
-        for key in self.O_list_kubo.keys():
-            if tabulate:
-                tmp = res[:,i,:]
-                res_dict['kubo'][key] = tmp.reshape([self.nkx,self.nky,self.nkz,-1])
-            else:
-                tmp = res[i,:]
-                res_dict['kubo'][key] = tmp*V_k
-            i += 1
-                
-        # time
+                res_dict[name] = Results[i+1] * V_k
+        
         import time
         time_str = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime())
         print(f"finish kubo calculation at {time_str}")
@@ -245,31 +206,36 @@ class TB_model:
 
         # save to pickle file
         import pickle
-        with open(f"res_dict_{time_str}.pkl", "wb") as f:
+        with open(f"{job_name}.pkl", "wb") as f:
             pickle.dump(res_dict, f)
-
+        print(f"save to {job_name}.pkl")
 
 # test pass
 if __name__ == "__main__":
     from TB_io import read_TB_model
     import operators as ops
-    model = read_TB_model("TB.npz")
+    model = read_TB_model("TB_Cu.npz")
+    model.cell_center *= 0.0
     # fermi level
-    model.EF = 13.43#model.set_EF("Cu.scf.out")
+    model.EF = 13.43 
+    # Or find EF from file
+    # model.set_EF("Cu.scf.out")
     model.set_E_fermis(-10,8,0.05)
     # operators
-    model.add_operator_inner(jnp.eye(model.nwan), "cumDOS")
-    #use ops
     matrix_all = ops.operator_matrix_all(['spd'])
-    model.add_operator_kubo(matrix_all.pre_prepared_operators["Lz"], "Lz")
+    Lz = matrix_all.pre_prepared_operators['Lz']
+    #calculators
+    model.clear_calculator()
+    model.make_calc_kubo("OHC_z",alpha=0,beta=1,Gamma=0.025,Operator=Lz)
+    model.make_calc_OBC("OHC_z_modern",alpha=0,beta=1,gamma=2,Gamma=0.025)
 
     #calculators
     #_inner_calculator = model.make_calc_inner()
     #_kubo_calculator =  model.make_calc_kubo()
-    _all_calculator = model.make_calc_all(kbT=0.026)
+    model.make_calc_all(kbT=0.003,use_A=True)
 
-    # k_mesh
+    # k_mesh        
     _,_ = model.make_k_mesh(nkx=100,nky=100,nkz=100)
-
+    
     # run 
-    model.run_all(batch_size=1000,tabulate=False)
+    model.run_all(job_name="modern",batch_size=1000,tabulate=False)
