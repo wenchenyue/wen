@@ -197,8 +197,51 @@ def make_calc_inner(model: TB_model, Operator: jnp.ndarray):
         return inner_product.real
     return _calculator
 
-# modern theory of orbital magnetism
+# testing version
+# Only for testing, not for production use
+def make_calc_mag_test(model: TB_model):
+    '''
+    make a calculator for the magnetism of the model
+    using testing version 
+    '''
+    AA_calc = make_calc_AA_k(model)
+    calculator_Hk = make_k_hamiltonian_velocity_calculator(model,use_A=False)
+    nwan = model.nwan
 
+    def _calculator(k:jnp.ndarray):
+        '''
+        calculate the magnetism of the model
+        para:
+            k: jnp.ndarray, # 3
+        return:
+            magnetism: jnp.ndarray, # nwan
+        '''
+        Hk, velocity_k = calculator_Hk(k)
+        E_k, Vec_k = jnp.linalg.eigh(Hk)
+        Vec_k_dagger = Vec_k.conj().T
+        AA_k_W = AA_calc(k)
+        #Vec_k_dagger @ AA_k_W @ Vec_k, shape (nwan,nwan,3)
+        AA_B = jnp.einsum("ij,jka,kl->ila",Vec_k_dagger,AA_k_W,Vec_k)    
+
+        Ediff = E_k[:,None] - E_k[None,:] # D[q,n] = E_qk - E_nk
+        G = Ediff / Ediff**2 + 1e-9  # nwan * nwan
+        G = jnp.fill_diagonal(G,0.0,inplace=False)
+        
+        velocity_H = jnp.einsum("ij,jka,kl->ila",Vec_k_dagger,velocity_k,Vec_k) # nwan * nwan * 3
+        D_term = 1j * G[:,:,None] * velocity_H # nwan * nwan * 3
+
+        AA_H = AA_B + D_term # nwan * nwan * 3
+        magnetism = jnp.zeros((3,nwan))
+        for gamma in  range(3):
+            alpha, beta = levi_civita[gamma]
+            temp = jnp.einsum("mn,nm,mn->n",Ediff,AA_H[:,:,alpha],AA_H[:,:,beta]).imag
+            magnetism = magnetism.at[gamma].set(temp)
+            
+        return magnetism
+    return _calculator
+
+
+# modern theory of orbital magnetism
 def make_calc_mag_modern(model: TB_model,gamma:int = 2):
     '''
     make a calculator for the magnetism of the model
@@ -572,6 +615,8 @@ def make_calc_mag_scan(model:TB_model,
 
         mag_A = jnp.zeros((3,nwan))
         mag_B = jnp.zeros((3,nwan))
+        # We need Im[ sum G * v_a * v_b ]
+        # Compute the cross product part common to both
         for gamma in  range(3):
             alpha,beta = levi_civita[gamma]
             cross_A_1 = jnp.einsum("qn,nq,qn->n", Gqn_A, v[alpha], v[beta], optimize='optimal')
@@ -586,22 +631,6 @@ def make_calc_mag_scan(model:TB_model,
         return mag_A, mag_B # 3 * nwan
 
 
-        # We need Im[ sum G * v_a * v_b ]
-        # Compute the cross product part common to both
-        # Note: Depending on your memory, calculating the cross matrix once is better
-        
-        # Term A calculation
-        cross_A_1 = jnp.einsum("qn,nq,qn->n", Gqn_A, v_alpha, v_beta, optimize='optimal')
-        cross_A_2 = jnp.einsum("qn,nq,qn->n", Gqn_A, v_beta, v_alpha, optimize='optimal')
-        mag_A = jnp.imag((cross_A_1 - cross_A_2) / 2) # Factor of 1/2 from definition
-        
-        # Term B calculation
-        cross_B_1 = jnp.einsum("qn,nq,qn->n", Gqn_B, v_alpha, v_beta, optimize='optimal')
-        cross_B_2 = jnp.einsum("qn,nq,qn->n", Gqn_B, v_beta, v_alpha, optimize='optimal')
-        mag_B = jnp.imag((cross_B_1 - cross_B_2) / 2)
-
-        # Return BOTH terms
-        return mag_A, mag_B
 
     @jax.jit
     def _calculator(k:jnp.ndarray):
