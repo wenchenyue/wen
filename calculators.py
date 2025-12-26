@@ -11,12 +11,6 @@ jax.config.update("jax_enable_x64", True)
 default_type_complex = jnp.complex128
 default_type_real = jnp.float64
 
-levi_civita = jnp.array([
-    [1,2],
-    [2,0],
-    [0,1]]
-    )
-
 # Calculators==================Begin
 # (E_k, Vec_k, velocity_k)-dependent calculators
 
@@ -296,8 +290,8 @@ def make_calc_mag_matrix(model: TB_model, gamma: int = 2):
         
         # Green's function: G[q, n] = 1/(E_q - E_n)
         # Small imaginary part (1e-12j) ensures numerical stability
-        G = 1.0 / (Ediff + 1e-12*1j)
-        G = jnp.fill_diagonal(G, 0.0, inplace=False)  # G[q,q] = 0 to exclude q=n terms
+        G = 1.0 / (Ediff + 1e-12 * 1j)
+        
         
         # Part 1: Terms involving 1/(E_q - E_n)
         # Σ_q G[q,n] * (v_α[n,q] * v_β[q,m] - v_β[n,q] * v_α[q,m])
@@ -336,8 +330,8 @@ def make_calc_OBC_modern(
     The orbital Berry curvature O_BC[n,k,α,β,γ] is defined as:
     
     O_BC[n,k,α,β,γ] = -2 * Im Σ_{m≠n} [1/(E_mk - E_nk)^2] * 
-                       [Σ_q (v_α[n,q] * M_γ[q,m] + M_γ[n,q] * v_α[q,m])/2] * v_β[m,n]
-    
+                       [Σ_q (v_α[n,q] * M_γ[q,m] + M_γ[n,q] * v_α[q,m])/2 * v_β[m,n] ]
+                    = -2 * Im Σ_{m≠n} [1/(E_mk - E_nk)^2] * 0.5{v_α, M_γ}[n,m] * v_β[m,n]
     where:
     - α, β: directions in the Kubo formula (response and perturbation directions)
     - γ: direction of the orbital magnetization moment
@@ -346,8 +340,7 @@ def make_calc_OBC_modern(
     - Γ (Gamma): Lorentzian broadening parameter for energy denominators
     
     Note: A negative sign is included in front of the OBC, which differs from the
-    original formula in Pezo et al. This sign convention choice affects the overall
-    sign of the orbital Hall conductivity.
+    original formula in Pezo et al. 
     
     Args:
         model (TB_model): The tight-binding model class instance containing model parameters.
@@ -408,11 +401,11 @@ def make_calc_OBC_modern(
         v_beta = Vec_k_dagger @ velocity_k[:,:,beta] @ Vec_k
         
         # Calculate orbital magnetization matrix (Eq. 6 in Pezo et al.)
-        magnetism = mag_calculator(E_k, Vec_k, velocity_k)
+        mag_matrix = mag_calculator(E_k, Vec_k, velocity_k)
         
-        # Compute symmetrized current operator J_α = (v_α * M_γ + M_γ * v_α)/2
+        # Compute symmetrized current operator J_α = (v_α @ M_γ + M_γ @ v_α)/2
         # This is Eq. (9) in Pezo et al.
-        v_alpha_J = (1/2) * (v_alpha @ magnetism + magnetism @ v_alpha)
+        J_alpha = (1/2) * (v_alpha @ mag_matrix + mag_matrix @ v_alpha)
         
         # Energy denominator with Lorentzian broadening: 1/[(E_m - E_n)^2 + Γ^2]
         Ediff2 = (E_k[:,None] - E_k[None,:])**2 + Gamma**2 + 1e-12
@@ -421,7 +414,7 @@ def make_calc_OBC_modern(
         
         # Compute orbital Berry curvature: O_BC[n] = -2 * Im[Σ_m G[m,n] * J_α[n,m] * v_β[m,n]]
         # Using einsum: "nm,nm,mn->n" means Σ_{n,m} G[n,m] * J_α[n,m] * v_β[m,n]
-        OBC = -2 * jnp.imag(jnp.einsum("nm,nm,mn->n", G, v_alpha_J, v_beta))
+        OBC = -2 * jnp.imag(jnp.einsum("nm,nm,mn->n", G, J_alpha, v_beta))
         
         return OBC
     return _calculator
@@ -513,11 +506,6 @@ def make_calc_kubo(
         If provided, calculates the Berry curvature associated with this operator
         using the symmetrized current operator J_O = 1/2{Operator, v_α}.
         
-        Common choices:
-        - None: Standard Berry curvature (anomalous Hall effect)
-        - σ_z: Spin Berry curvature (spin Hall effect)
-        - L_z: Orbital angular momentum Berry curvature
-        
         Default is None.
     
     **Returns:**
@@ -559,76 +547,7 @@ def make_calc_kubo(
        The calculation sums over all bands m ≠ n. The diagonal terms (m=n) are
        excluded as they don't contribute to interband transitions in the linear
        response regime.
-    
-    4. **Units and Conventions:**
-       - Energy units: eV
-       - The result is dimensionless (Berry curvature in units of Å²)
-       - To convert to physical conductivity, multiply by (e²/ℏ) and sum over
-         occupied bands with Fermi-Dirac distribution weights.
-    
-    5. **Performance Considerations:**
-       This function is designed to be JIT-compiled with JAX for efficient
-       computation over many k-points. The einsum operation is optimized for
-       GPU/TPU acceleration.
-    
-    **Examples:**
-    
-    Example 1: Calculate Berry curvature (anomalous Hall effect)
-    ```python
-    # Create calculator for Berry curvature Ω_xy
-    calc_BC = make_calc_kubo(model, alpha=0, beta=1, Gamma=0.025)
-    
-    # Calculate for a single k-point
-    E_k, Vec_k, velocity_k = model.get_k_point_properties(k)
-    BC = calc_BC(E_k, Vec_k, velocity_k)  # shape: (nwan,)
-    
-    # Integrate over Brillouin zone to get Hall conductivity
-    sigma_xy = (e**2 / hbar) * sum_{k,n} f_n(k) * BC_n(k)
-    ```
-    
-    Example 2: Calculate spin Berry curvature (spin Hall effect)
-    ```python
-    # Define spin operator (assuming spin-1/2 system)
-    sigma_z = jnp.kron(jnp.eye(norb), jnp.array([[1, 0], [0, -1]]))
-    
-    # Create calculator for spin Berry curvature
-    calc_spin_BC = make_calc_kubo(model, alpha=0, beta=1, Gamma=0.025,
-                                   Operator=sigma_z)
-    
-    # Calculate and integrate
-    spin_BC = calc_spin_BC(E_k, Vec_k, velocity_k)
-    sigma_xy^s = (e**2 / hbar) * sum_{k,n} f_n(k) * spin_BC_n(k)
-    ```
-    
-    Example 3: Calculate Berry curvature for different directions
-    ```python
-    # Calculate all components of the Berry curvature tensor
-    calc_xy = make_calc_kubo(model, alpha=0, beta=1)  # Ω_xy
-    calc_yz = make_calc_kubo(model, alpha=1, beta=2)  # Ω_yz
-    calc_zx = make_calc_kubo(model, alpha=2, beta=0)  # Ω_zx
-    
-    # Compute for all k-points in the Brillouin zone
-    BC_xy = jnp.array([calc_xy(*model.get_k_point_properties(k)) 
-                       for k in kpoints])
-    ```
-    
-    **References:**
-    
-    1. Kubo, R. (1957). "Statistical-Mechanical Theory of Irreversible Processes."
-       Journal of the Physical Society of Japan, 12(6), 570-586.
-       https://doi.org/10.1143/JPSJ.12.570
-    
-    2. Nagaosa, N., Sinova, J., Onoda, S., MacDonald, A. H., & Ong, N. P. (2010).
-       "Anomalous Hall effect." Reviews of Modern Physics, 82(2), 1539-1592.
-       https://doi.org/10.1103/RevModPhys.82.1539
-    
-    3. Xiao, D., Chang, M. C., & Niu, Q. (2010). "Berry phase effects on electronic properties."
-       Reviews of Modern Physics, 82(3), 1959-2007.
-       https://doi.org/10.1103/RevModPhys.82.1959
-    
-    4. Sinova, J., Valenzuela, S. O., Wunderlich, J., Back, C. H., & Jungwirth, T. (2015).
-       "Spin Hall effects." Reviews of Modern Physics, 87(4), 1213-1260.
-       https://doi.org/10.1103/RevModPhys.87.1213    
+      
     """
     nwan = model.nwan
     if Operator is None:
