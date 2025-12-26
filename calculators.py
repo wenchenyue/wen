@@ -739,6 +739,9 @@ def make_calc_kubo(
 
 
 # K-dependent calculators
+# ======================================================
+# jax.jit only use for k-dependent calculators
+
 def make_calc_all(model:TB_model,
                 kbT:float=0.026, # room temperature
                 use_A:bool=False,
