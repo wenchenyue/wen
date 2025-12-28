@@ -7,8 +7,8 @@ import jax.numpy as jnp
 
 
 jax.config.update("jax_enable_x64", True)
-default_type_complex = jnp.complex128
-default_type_real = jnp.float64
+DEFAULT_TYPE_COMPLEX = jnp.complex128
+DEFAULT_TYPE_REAL = jnp.float64
 
 def run_kps(
              kps:jnp.ndarray,
@@ -35,12 +35,12 @@ def run_kps(
     if tabulate:
         # nk, 1 + n_calc_all, n_fermi(or n_band)
         Results = jnp.zeros([nk,warm_up.shape[0],warm_up.shape[1]],
-                             device=jax.devices("cpu")[0],dtype=default_type_real)
+                             device=jax.devices("cpu")[0],dtype=DEFAULT_TYPE_REAL)
         # estimate memory usage
         mem_usage = nk * warm_up.size * 8 / 1024 / 1024
         print(f"Use tabulating, estimated memory usage: {mem_usage:.3f} MB")
     else:# 1 + n_calc_all, n_fermi(or n_band)
-        Results = jnp.zeros(warm_up.shape,device=jax.devices("cpu")[0],dtype=default_type_real)
+        Results = jnp.zeros(warm_up.shape,device=jax.devices("cpu")[0],dtype=DEFAULT_TYPE_REAL)
 
     # check GPU
     
