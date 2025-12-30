@@ -215,9 +215,9 @@ if __name__ == "__main__":
     from TB_io import read_TB_model
     import operators as ops
     model = read_TB_model("TB_Cu.npz")
-    model.cell_center *= 0.0
+
     # fermi level
-    model.EF = 13.43 
+    model.EF = 12.43 
     # Or find EF from file
     # model.set_EF("Cu.scf.out")
     model.set_E_fermis(-10,8,0.05)

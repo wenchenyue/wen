@@ -20,6 +20,10 @@ BC_calculator = model.make_calc_kubo(
                                 Gamma=0.025,
                                 Operator=Lz)
 
+modern_calc= model.make_calc_OBC(
+    "modern",0,1,2,0.025    
+)
+
 model.make_calc_all(kbT=0.003,use_A=False)
 model.make_k_mesh(80,80,80)
 
