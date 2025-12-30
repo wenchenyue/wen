@@ -4,8 +4,8 @@ import jax.numpy as jnp
 
 # using double precision
 jax.config.update("jax_enable_x64", True)
-default_type_complex = jnp.complex128
-default_type_real = jnp.float64
+DEFAULT_TYPE_COMPLEX = jnp.complex128
+DEFAULT_TYPE_REAL = jnp.float64
 
 
 num_ao = { # num of atomic orbitals for each orbital type, considering spin
@@ -33,7 +33,7 @@ class operator_matrix_all:
             'Ly' :self.L[:,:,1],
             'Lz' :self.L[:,:,2],
             'LS' :self.LS,
-            "I"  :jnp.eye(self.ndim,dtype=default_type_real),
+            "I"  :jnp.eye(self.ndim,dtype=DEFAULT_TYPE_REAL),
         }
 
 
@@ -77,7 +77,7 @@ def build_P_easy(orbital_all:list[str],selected:str):
     return: projection operator, shape (norb,norb)
     """
     select_list = [1 if o==selected else 0 for o in orbital_all]    
-    return jnp.diag(jnp.array(select_list,dtype=default_type_real))
+    return jnp.diag(jnp.array(select_list,dtype=DEFAULT_TYPE_REAL))
 
 
 def build_operator_all(orbital_list:list[str]):
@@ -127,8 +127,8 @@ def build_operator_LS(orbital_list:list[str],use_LS_base:bool=False):
     
     # init operator matrix
     norb = sum(orbital_all)
-    S = jnp.zeros((norb,norb,3),dtype=default_type_complex)
-    L = jnp.zeros((norb,norb,3),dtype=default_type_complex)
+    S = jnp.zeros((norb,norb,3),dtype=DEFAULT_TYPE_COMPLEX)
+    L = jnp.zeros((norb,norb,3),dtype=DEFAULT_TYPE_COMPLEX)
 
     # choose which operator matrix to use
     if use_LS_base:

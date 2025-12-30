@@ -3,13 +3,13 @@
 import jax
 import jax.numpy as jnp
 from TB_model import TB_model
-from utility import fermi_dirac_vamp
+from utility import fermi_dirac_vamp, fermi_dirac_derivative_vamp
 from Hk import make_k_hamiltonian_calculator, make_k_hamiltonian_velocity_calculator
 
 # using double precision
 jax.config.update("jax_enable_x64", True)
-default_type_complex = jnp.complex128
-default_type_real = jnp.float64
+DEFAULT_TYPE_COMPLEX = jnp.complex128
+DEFAULT_TYPE_REAL = jnp.float64
 
 # Calculators==================Begin
 # (E_k, Vec_k, velocity_k)-dependent calculators
@@ -664,6 +664,7 @@ def make_calc_kubo(
 def make_calc_all(model:TB_model,
                 kbT:float=0.026, # room temperature
                 use_A:bool=False,
+                scanner_type:str="FD", # Fermi-Dirac scanner type: "FD" or "FD_deri"
                 ):
     """
     Create a unified calculator to compute all registered calculators for k-points.
@@ -697,6 +698,12 @@ def make_calc_all(model:TB_model,
     use_A : bool, optional
         Whether to include vector potential A in velocity calculation.
         Default is False.
+    
+    scanner_type : str, optional
+        Type of Fermi-Dirac scanner to use for weighting.
+        - "FD": use standard Fermi-Dirac distribution f(E) = 1/(exp((E-mu)/kBT) + 1)
+        - "FD_deri": use Fermi-Dirac derivative -f*(1-f)/kBT for Fermi surface integration
+        Default is "FD".
     
     **Returns:**
     
@@ -735,7 +742,9 @@ def make_calc_all(model:TB_model,
        ```
        result(E_F) = Σ_n f_n(E_F, kbT) * calculator_result_n
        ```
-       where f_n is the Fermi-Dirac distribution for band n.
+       where f_n is determined by the scanner_type parameter:
+       - scanner_type="FD": standard Fermi-Dirac distribution
+       - scanner_type="FD_deri": Fermi-Dirac derivative (for DOS calculations)
     
     3. **Performance:**
        The returned function is JIT-compiled with JAX for optimal performance.
@@ -746,55 +755,6 @@ def make_calc_all(model:TB_model,
        - Subsequent rows contain results in the order they appear in
          model.all_calculators.keys()
     
-    **Examples:**
-    
-    Example 1: Compute Berry curvature without Fermi scanning
-    ```python
-    # Register calculators
-    model.all_calculators['BC'] = make_calc_kubo(model, alpha=0, beta=1)
-    
-    # Create unified calculator
-    calc_all = make_calc_all(model, kbT=0.0)
-    
-    # Compute for a single k-point
-    results = calc_all(jnp.array([0.1, 0.2, 0.0]))
-    # results[0]: band energies, shape (nwan,)
-    # results[1]: Berry curvature, shape (nwan,)
-    ```
-    
-    Example 2: Compute with Fermi level scanning
-    ```python
-    # Set Fermi levels
-    model.E_fermis = jnp.linspace(-1.0, 1.0, 100)  # 100 Fermi levels
-    
-    # Create calculator with finite temperature
-    calc_all = make_calc_all(model, kbT=0.026)  # room temperature
-    
-    # Compute for k-point
-    results = calc_all(k)
-    # results[0]: total energy for each Fermi level, shape (100,)
-    # results[1]: Berry curvature summed over bands for each Fermi level
-    ```
-    
-    Example 3: Compute over k-point mesh
-    ```python
-    # Generate k-point mesh
-    kpoints = generate_kmesh(nk=20)  # 20x20x20 mesh
-    
-    # Compute for all k-points
-    all_results = jnp.array([calc_all(k) for k in kpoints])
-    # shape: (nk, 1+n_calculators, nwan) or (nk, 1+n_calculators, n_fermi)
-    
-    # Integrate over Brillouin zone
-    integrated = jnp.mean(all_results, axis=0)
-    ```
-    
-    **See Also:**
-    
-    - make_calc_kubo : Create Kubo formula calculator
-    - make_calc_mag_modern : Create orbital magnetization calculator
-    - make_calc_OBC_modern : Create orbital Berry curvature calculator
-    - fermi_dirac_vamp : Fermi-Dirac distribution function
     
     """
     nwan = model.nwan
@@ -814,6 +774,16 @@ def make_calc_all(model:TB_model,
         print(f"calculate the fermi scan with kbT = {kbT}")
         E_fermis = model.E_fermis
         assert model.E_fermis is not None
+        
+        scanner_type = scanner_type.lower()
+        if scanner_type == "fd":
+            scanner_func = fermi_dirac_vamp
+            print("using standard Fermi-Dirac distribution scanner")
+        elif scanner_type == "fd_deri":
+            scanner_func = fermi_dirac_derivative_vamp
+            print("using Fermi-Dirac derivative scanner")
+        else:
+            raise ValueError(f"Invalid scanner_type: {scanner_type}. Must be 'FD' or 'FD_deri'")
     else: 
         scan = False
         print("no fermi scan, output all bands")
@@ -845,7 +815,7 @@ def make_calc_all(model:TB_model,
                     - Columns correspond to different Fermi levels in E_fermis
         """
         # n_calc+1 * nwan
-        result_bands = jnp.zeros((shape1, nwan), dtype=default_type_real)
+        result_bands = jnp.zeros((shape1, nwan), dtype=DEFAULT_TYPE_REAL)
         if shape1 == 1:
             # Only calculate energy (no calculators registered)
             Hk = calculator_Hk(k)
@@ -866,10 +836,10 @@ def make_calc_all(model:TB_model,
             # Return results for all bands
             return result_bands
         else:
-            # Apply Fermi-Dirac weighting
-            f_distribution = fermi_dirac_vamp(E_k, E_fermis, kbT)  # nwan * len(E_fermis)
+            # Apply Fermi-Dirac weighting using selected scanner
+            f_distribution = scanner_func(E_k, E_fermis, kbT)  # nwan * len(E_fermis)
             # Weight each calculator result by Fermi-Dirac distribution
-            result_scan = result_bands[:, :, None] * f_distribution[None, :, :]  # n_calc+1 * nwan * len(E_fermis)
+            result_scan = result_bands[:, :, None] * f_distribution[None, :, :]  # n_calc+1 * nwan * len(E_fermi)
             # Sum over bands to get Fermi-level-dependent results
             return jnp.sum(result_scan, axis=1)  # n_calc+1 * len(E_fermi), sum over nwan
     return _calculator
