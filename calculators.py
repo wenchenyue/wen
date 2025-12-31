@@ -655,6 +655,80 @@ def make_calc_kubo(
         return -2 * jnp.imag(Omega_array)
     return _calculator
 
+def make_calc_intra(model:TB_model,
+                beta:int=2, # direction of E field
+                Operator:jnp.ndarray=None,
+                ):
+    """
+    Create a calculator for intraband contribution to an operator.
+    
+    This function implements the intraband contribution formula from modern theory
+    of orbital magnetism (eq. 3 in arXiv:2509.03026). The intraband contribution
+    for band n in direction beta is:
+    
+    ```
+    O_intra(k,n,beta) = <u(n,k)|v_beta|u(n,k)> * <u(n,k)|O|u(n,k)>
+    ```
+    
+    **Important:** This calculator must be used with scanner_type='FD_deri' in
+    make_calc_all to compute Fermi surface integrals properly.
+    
+    **Parameters:**
+    
+    model : TB_model
+        The tight-binding model instance.
+    
+    beta : int, optional
+        Direction of the electric field (0=x, 1=y, 2=z).
+        Default is 2 (z-direction).
+    
+    Operator : jnp.ndarray, optional
+        Operator matrix in orbital basis, shape (nwan, nwan).
+        If None, uses identity matrix.
+        Default is None.
+    
+    **Returns:**
+    
+    function
+        A calculator function with signature:
+        ```
+        _calculator(E_k, Vec_k, Vel_k) -> jnp.ndarray
+        ```
+        Returns intraband contribution for each band, shape (nwan,).
+    """
+
+    print("calculate intraband contribution, be sure use 'FD_deri' scanner")
+
+    nwan = model.nwan
+    assert beta in [0,1,2], "beta must be 0, 1, or 2"
+    if Operator is None:
+        print("Warning: Operator is None, use identity matrix instead")
+        Operator = jnp.eye(nwan)
+    else:
+        assert Operator.shape == (nwan,nwan), f"Operator shape must be ({nwan},{nwan}), but got {Operator.shape}"
+    
+    def _calculator(E_k:jnp.ndarray, Vec_k:jnp.ndarray, Vel_k:jnp.ndarray):
+        """
+        Calculate intraband contribution for each band.
+        
+        Args:
+            E_k: Eigenvalues, shape (nwan,). Unused, kept for interface.
+            Vec_k: Eigenvectors, shape (nwan, nwan).
+            Vel_k: Velocity operator, shape (nwan, nwan, 3).
+        
+        Returns:
+            jnp.ndarray: Intraband contribution for each band, shape (nwan,).
+        """
+        Vec_k_dagger = Vec_k.conj().T
+        v_beta = jnp.einsum('ij,jk,ki->i', Vec_k_dagger, Vel_k[:,:,beta], Vec_k) # nwan
+        O_term = jnp.einsum('ij,jk,ki->i', Vec_k_dagger, Operator, Vec_k) # nwan
+
+        intra = v_beta * O_term
+
+        return intra
+    return _calculator
+        
+
 
 
 # K-dependent calculators
