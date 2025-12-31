@@ -191,7 +191,7 @@ class TB_model:
         Results = run_kps(k_points,self.cal_all,batch_size=batch_size,tabulate=tabulate)
         print(Results.shape)
 
-        res_dict["Energy"] = Results[0]
+        res_dict["Energy"] = np.asarray(Results[0])
         all_calculators_name = list(self.all_calculators.keys())
         for i,name in enumerate(all_calculators_name):
             if tabulate:
