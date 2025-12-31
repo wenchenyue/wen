@@ -195,9 +195,9 @@ class TB_model:
         all_calculators_name = list(self.all_calculators.keys())
         for i,name in enumerate(all_calculators_name):
             if tabulate:
-                res_dict[name] = Results[:,i+1:].reshape((self.nkx,self.nky,self.nkz,-1))
+                res_dict[name] = np.asarray(Results[:,i+1:].reshape((self.nkx,self.nky,self.nkz,-1)))
             else:
-                res_dict[name] = Results[i+1] * V_k
+                res_dict[name] = np.asarray(Results[i+1] * V_k)
         
         import time
         time_str = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime())
