@@ -70,15 +70,19 @@ def build_k_mesh(model:TB_model,
     """
     nk = nkx * nky * nkz
     model.V_k = model.V/nk # normalize V to V_k
-
-    k_mesh = jnp.meshgrid(jnp.linspace(0,1,nkx,endpoint=False),
-                              jnp.linspace(0,1,nky,endpoint=False),
-                              jnp.linspace(0,1,nkz,endpoint=False), 
+    # use numpy to generate meshgrid
+    import numpy as np
+    k_mesh = np.meshgrid(np.linspace(0,1,nkx,endpoint=False),
+                              np.linspace(0,1,nky,endpoint=False),
+                              np.linspace(0,1,nkz,endpoint=False), 
                               indexing='ij')
-    k_mesh = jnp.stack(k_mesh,axis=-1)
-    # reshape, multiply, and put to cpu
-    k_points = jnp.reshape(k_mesh,(-1,3))
-    k_points = jax.device_put(jnp.dot(k_points,model.recip_lattice),jax.devices("cpu")[0])
+    k_mesh = np.stack(k_mesh,axis=-1)
+    k_points = np.reshape(k_mesh,(-1,3))
+    k_points = np.dot(k_points,np.array(model.recip_lattice))
+    # put to jax cpu
+    k_mesh = jax.device_put(k_mesh,jax.devices("cpu")[0])
+    k_points = jax.device_put(k_points,jax.devices("cpu")[0])
+
     print(f"there are {nk} k points in k mesh")
     
     return k_mesh, k_points

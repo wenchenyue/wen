@@ -45,11 +45,11 @@ def run_kps(
         mem_usage = nk * warm_up.size * 8 / 1024 / 1024
         print(f"Use tabulating, estimated memory usage: {mem_usage:.3f} MB")
     else:# 1 + n_calc_all, n_fermi(or n_band)
-        Results = jnp.zeros(warm_up.shape,device=jax.devices("cpu")[0],dtype=DEFAULT_TYPE_REAL)
+        Results = jnp.zeros(warm_up.shape,device=jax.devices("gpu")[0],dtype=DEFAULT_TYPE_REAL)
 
     # check GPU
-    
     if jax.local_devices()[0].platform == 'gpu':
+        gpu_devices = jax.devices('gpu')
         gpu_num = len(jax.local_devices())
         calculator_pmap = jax.pmap(calculator_vmap)
         print(f"GPU is available, number: {gpu_num}")  
@@ -73,11 +73,15 @@ def run_kps(
 
     # run
     for i in trange(batch_num):
+        # get batch k and put to gpu if available
         batch_k = batch_k_set[i]
+        if gpu_num > 0:
+            batch_k = jax.device_put(batch_k, device=gpu_devices[0])
         
         ## running step
         if gpu_num > 1:
             batch_k = batch_k.reshape([gpu_num,batch_size//gpu_num,3])
+            batch_k = jax.device_put_sharded(list(batch_k), devices=gpu_devices)
             result = calculator_pmap(batch_k)
             # gpu_num, batch_size//gpu_num, n_operator, n_fermi(or n_band)
             # to batch_size, n_operator, n_fermi(or n_band)
@@ -94,7 +98,7 @@ def run_kps(
         else:
             # 在GPU上先求和，再取回CPU，避免在CPU上进行求和操作
             result = jnp.sum(result, axis=0)
-            result = jax.device_put(result, device=jax.devices("cpu")[0])
+            result = jax.device_put(result, device=jax.devices("gpu")[0])
             Results += result
 
     return Results
