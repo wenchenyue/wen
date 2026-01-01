@@ -13,7 +13,7 @@ DEFAULT_TYPE_REAL = jnp.float64
 def run_kps(
              kps:jnp.ndarray,
              calculator:callable,
-             batch_size:int=100,
+             batch_size:int=1000,
              tabulate:bool=False,
              ):
     '''
@@ -24,6 +24,11 @@ def run_kps(
     param tabulate: whether to tabulate the results, default is False
     return: observable, shape (nk,n_operator,n_fermi(or n_band)) if tabulate is True, else (n_operator,n_fermi(or n_band))
     '''
+
+
+    # estimate size of kps, use nbyte
+    kps_size = kps.nbytes
+    print(f"kps size: {kps_size / 1024 / 1024:.3f} MB")
 
     nk = kps.shape[0]
        
@@ -76,18 +81,21 @@ def run_kps(
             result = calculator_pmap(batch_k)
             # gpu_num, batch_size//gpu_num, n_operator, n_fermi(or n_band)
             # to batch_size, n_operator, n_fermi(or n_band)
-            result = jax.device_put(result.reshape([batch_size,*result.shape[2:]]),
-                                    device=jax.devices("cpu")[0])
+            result = result.reshape([batch_size,*result.shape[2:]])
 
         else:
-            result = jax.device_put(calculator_vmap(batch_k),
-                                    device=jax.devices("cpu")[0])
+            result = calculator_vmap(batch_k)
         
         ## post processing
         if tabulate:
+            # 直接取回结果用于切片赋值
+            result = jax.device_put(result, device=jax.devices("cpu")[0])
             Results = Results.at[i*batch_size:(i+1)*batch_size].set(result)
         else:
-            Results += jnp.sum(result,axis=0)
+            # 在GPU上先求和，再取回CPU，避免在CPU上进行求和操作
+            result = jnp.sum(result, axis=0)
+            result = jax.device_put(result, device=jax.devices("cpu")[0])
+            Results += result
 
     return Results
 
