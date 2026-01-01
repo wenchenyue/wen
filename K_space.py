@@ -76,8 +76,9 @@ def build_k_mesh(model:TB_model,
                               jnp.linspace(0,1,nkz,endpoint=False), 
                               indexing='ij')
     k_mesh = jnp.stack(k_mesh,axis=-1)
-    k_points = k_mesh.reshape(-1,3)
-    k_points = jnp.dot(k_points,model.recip_lattice)
+    # reshape, multiply, and put to cpu
+    k_points = jnp.reshape(k_mesh,(-1,3))
+    k_points = jax.device_put(jnp.dot(k_points,model.recip_lattice),jax.devices("cpu")[0])
     print(f"there are {nk} k points in k mesh")
     
     return k_mesh, k_points
