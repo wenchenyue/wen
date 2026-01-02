@@ -92,11 +92,9 @@ def run_kps(
         
         ## post processing
         if tabulate:
-            # 直接取回结果用于切片赋值
             result = jax.device_put(result, device=jax.devices("cpu")[0])
             Results = Results.at[i*batch_size:(i+1)*batch_size].set(result)
         else:
-            # 在GPU上先求和，再取回CPU，避免在CPU上进行求和操作
             result = jnp.sum(result, axis=0)
             result = jax.device_put(result, device=jax.devices("gpu")[0])
             Results += result
