@@ -1,5 +1,5 @@
 
-
+import types
 import jax
 import jax.numpy as jnp
 from TB_model import TB_model
@@ -35,7 +35,7 @@ levi_civita = jnp.array([
 # (E_k, Vec_k, velocity_k)-DEPENDENT CALCULATORS
 # ==============================================================================
 
-def make_calc_inner(model: TB_model, Operator: jnp.ndarray):
+def make_calc_inner(model: TB_model, Operator = None, H_gauge: bool = False):
     """
     Create a calculator for computing the inner product of an operator with wavefunctions.
     
@@ -70,14 +70,24 @@ def make_calc_inner(model: TB_model, Operator: jnp.ndarray):
         - The result is always real because we're computing expectation values of Hermitian operators.
         - After Fermi-Dirac smearing, states below EF contribute 1, above EF contribute 0.
     
-    Example:
-        >>> # Compute cumulative DOS (identity operator)
-        >>> model = read_TB_model("TB.npz")
-        >>> calc_dos = make_calc_inner(model, jnp.eye(model.nwan))
-        >>> results = calc_dos(E_k, Vec_k, velocity_k)
+
     """
     nwan = model.nwan
-    assert Operator.shape == (nwan,nwan), f"Operator shape should be ({nwan},{nwan}), but got {Operator.shape}"
+
+    if Operator is None:
+        Operator_func = lambda *args, **kwargs: jnp.eye(nwan)
+    elif isinstance(Operator,jnp.ndarray):
+        assert Operator.shape == (nwan,nwan), f"Operator shape should be ({nwan},{nwan}), but got {Operator.shape}"
+        Operator_func = lambda *args, **kwargs: Operator
+    elif isinstance(Operator,types.FunctionType): 
+        # Only custom functions are supported, built-in functions and callable objects are not.
+        Operator_func = Operator
+        # useful check for developers to ensure the function signature is correct
+        import inspect
+        sig = inspect.signature(Operator_func)
+        print(f"custom Operator function {Operator_func.__name__}, parameters: {sig}")
+    else:
+        raise ValueError(f"Operator type {type(Operator)} is not supported. Only None, jnp.ndarray, and custom functions are allowed.")
 
     def _calculator(
         E_k:jnp.ndarray,
@@ -96,13 +106,18 @@ def make_calc_inner(model: TB_model, Operator: jnp.ndarray):
             jnp.ndarray: Real expectation values for each band, shape (nwan,).
         """
         # Compute <ψ_n|O|ψ_n> = Σ_{i,j} ψ_n*[i] * O[i,j] * ψ_n[j]
-        # Using einsum for efficient computation: 'ij,jk,ki->i' means:
+        # where:
         #   Vec_k.conj().T[i,j] = ψ_n*[j] (transpose of conjugate)
         #   Operator[j,k] = O[j,k]
         #   Vec_k[k,i] = ψ_n[i]
         #   Result[i] = Σ_{j,k} ψ_n*[j] * O[j,k] * ψ_n[k] = <ψ_n|O|ψ_n>
-        inner_product = jnp.einsum('ij,jk,ki->i', Vec_k.conj().T, Operator, Vec_k, optimize='optimal')
-        return inner_product.real
+
+        if H_gauge: # operator in the Hamiltonian(band) basis
+            return jnp.real(jnp.diag(Operator_mat))
+        else: # operator in the orbital(wannier) basis
+            Operator_mat = Operator_func(E_k, Vec_k, velocity_k)
+            inner_product = jnp.einsum('ij,jk,ki->i', Vec_k.conj().T, Operator_mat, Vec_k, optimize='optimal')
+            return jnp.real(inner_product)
     return _calculator
 
 
@@ -147,13 +162,7 @@ def make_calc_mag_modern(model: TB_model, gamma: int = 2):
     References:
         Pezo et al., PHYSICAL REVIEW B 106, 104414 (2022), Eq. (6)
     
-    Example:
-        >>> # Calculate z-component of orbital magnetization
-        >>> model = read_TB_model("TB.npz")
-        >>> calc_mag = make_calc_mag_modern(model, gamma=2)
-        >>> mag_moments = calc_mag(E_k, Vec_k, velocity_k)
     """
-    nwan = model.nwan
     print(f"modern theory of orbital magnetism, caution: only calculate the intrinsic part")
     alpha, beta = levi_civita[gamma]
     
@@ -367,14 +376,7 @@ def make_calc_OBC_modern(
     
     References:
         Pezo et al., PHYSICAL REVIEW B 106, 104414 (2022)
-    
-    Example:
-        >>> # Calculate orbital Berry curvature for OHC (α=0, β=1, γ=2)
-        >>> model = read_TB_model("TB.npz")
-        >>> calc_obc = make_calc_OBC_modern(model, alpha=0, beta=1, gamma=2, Gamma=0.025)
-        >>> obc = calc_obc(E_k, Vec_k, velocity_k)
     """
-    nwan = model.nwan
     # Create calculator for orbital magnetization matrix
     mag_calculator = make_calc_mag_matrix(model, gamma)
 
@@ -426,7 +428,8 @@ def make_calc_kubo(
     alpha: int = 0,  # 1st direction of kubo formula
     beta: int = 1,   # 2nd direction of kubo formula
     Gamma: float = 0.025,  # smearing width, in eV unit
-    Operator: jnp.ndarray = None,  # default is None, then calc Berry Curvature
+    Operator = None,  # default is None, then calc Berry Curvature
+    H_gauge: bool = False,  # default is False, then calc Operator-specific Berry Curvature
     ):
     """
     Create a calculator for the Kubo linear response function.
@@ -551,9 +554,19 @@ def make_calc_kubo(
     """
     nwan = model.nwan
     if Operator is None:
-        print("calculate Berry Curvature")
+        Operator_func = lambda *args, **kwargs: jnp.eye(nwan)
+    elif isinstance(Operator,jnp.ndarray):
+        assert Operator.shape == (nwan,nwan), f"Operator shape should be ({nwan},{nwan}), but got {Operator.shape}"
+        Operator_func = lambda *args, **kwargs: Operator
+    elif isinstance(Operator,types.FunctionType): 
+        # Only custom functions are supported, built-in functions and callable objects are not.
+        Operator_func = Operator  
+        # useful check for developers to ensure the function signature is correct
+        import inspect
+        sig = inspect.signature(Operator_func)
+        print(f"custom Operator function {Operator_func.__name__}, parameters: {sig}")
     else:
-        assert Operator.shape == (nwan, nwan), f"Operator shape {Operator.shape} is not (nwan,nwan)"
+        raise ValueError(f"Operator type {type(Operator)} is not supported. Only None, jnp.ndarray, and custom functions are allowed.")  # pyright: ignore[reportUnreachable]
 
     def _calculator(
         E_k: jnp.ndarray,
@@ -614,6 +627,14 @@ def make_calc_kubo(
         # We exclude diagonal elements (n=m) by setting them to 0.0, as they
         # don't contribute to interband transitions in the linear response regime
         G = jnp.fill_diagonal(1.0/denominator, 0.0, inplace=False)
+
+        Operator_mat = Operator_func(E_k, Vec_k, velocity_k)
+        if  H_gauge:# operator in the Hamiltonian(band) basis
+            v_alpha = Vec_k_dagger @ velocity_k[:,:,alpha] @ Vec_k
+            v_alpha = 0.5 * (Operator_mat @ v_alpha + v_alpha @ Operator_mat)
+        else: # operator in the orbital basis
+            J_O = 0.5 * (Operator_mat @ velocity_k[:,:,alpha] + velocity_k[:,:,alpha] @ Operator_mat)   
+            v_alpha = Vec_k_dagger @ J_O @ Vec_k
 
         if Operator is None:
             # Pure Berry Curvature calculation
@@ -1019,7 +1040,7 @@ def make_calc_mag_scan(model:TB_model,
 
 
 # testing version
-# Only for testing, not for production use
+# Only for testing, not for use
 def make_calc_mag_test(model: TB_model):
     '''
     make a calculator for the magnetism of the model
@@ -1055,7 +1076,7 @@ def make_calc_mag_test(model: TB_model):
         magnetism = jnp.zeros((3,nwan))
         for gamma in  range(3):
             alpha, beta = levi_civita[gamma]
-            temp = jnp.einsum("mn,nm,mn->n",Ediff,AA_H[:,:,alpha],AA_H[:,:,beta]).imag
+            temp = jnp.imag(jnp.einsum("mn,nm,mn->n",Ediff,AA_H[:,:,alpha],AA_H[:,:,beta]))
             magnetism = magnetism.at[gamma].set(temp)
             
         return magnetism
