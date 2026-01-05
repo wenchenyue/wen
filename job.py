@@ -38,4 +38,4 @@ model.make_calc_kubo(
 model.make_calc_all(kbT=0.003,use_A=False)
 model.make_k_mesh(160,160,160)
 
-model.run_all("Cu",100,tabulate=False)
+model.run_all("Cu",400,tabulate=False)
