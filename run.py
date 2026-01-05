@@ -91,7 +91,7 @@ def run_kps_gpu(
             Results = Results.at[i*batch_size:(i+1)*batch_size].set(result)
         else:
             result = jnp.sum(result, axis=0)
-            Results += result
+            Results += jax.device_put(result, device=jax.devices("gpu")[0])
 
     return Results
 
