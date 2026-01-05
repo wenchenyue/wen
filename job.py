@@ -32,12 +32,7 @@ model.make_calc_kubo(
                     Operator=Lz_modern,
                     H_gauge=True
                     )
-model.make_calc_OBC("chk",
-                     alpha=0,
-                     beta=1,
-                     gamma=2,
-                     Gamma=0.025,
-                    )
+
 
 model.make_calc_all(kbT=0.003,use_A=False)
 model.make_k_mesh(160,160,160)
