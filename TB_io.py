@@ -2,9 +2,10 @@
 import jax
 import jax.numpy as jnp
 from TB_model import TB_model
+from utility import DEFAULT_TYPE_COMPLEX, DEFAULT_TYPE_REAL
 
 # using double precision
-jax.config.update("jax_enable_x64", True)
+# jax.config.update("jax_enable_x64", True)
 
 # io ================================ BEGIN
 def read_TB_model(file_name: str) -> TB_model:
@@ -26,12 +27,12 @@ def read_TB_model(file_name: str) -> TB_model:
     if file_name.endswith(".npz"):
         print (f"read_TB_model: read {file_name}")
         data = jnp.load(file_name)
-        HR = data['HR']
-        cell_center = data['cRvec']
-        center_list = data['Wan_center']
-        AA_R = data['AA_R']
-        real_lattice = data['real_lattice']
-        recip_lattice = data['recip_lattice']
+        HR = data['HR'].astype(DEFAULT_TYPE_COMPLEX)
+        cell_center = data['cRvec'].astype(DEFAULT_TYPE_REAL)
+        center_list = data['Wan_center'].astype(DEFAULT_TYPE_REAL)
+        AA_R = data['AA_R'].astype(DEFAULT_TYPE_COMPLEX)
+        real_lattice = data['real_lattice'].astype(DEFAULT_TYPE_REAL)
+        recip_lattice = data['recip_lattice'].astype(DEFAULT_TYPE_REAL)
         
         return TB_model(HR=HR,
                         cell_center=cell_center,
