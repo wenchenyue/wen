@@ -4,10 +4,7 @@ from TB_model import TB_model
 
 
 
-# using double precision
-jax.config.update("jax_enable_x64", True)
-DEFAULT_TYPE_COMPLEX = jnp.complex128
-DEFAULT_TYPE_REAL = jnp.float64
+
 
 # Hk Calculators==================Begin
 

@@ -1,9 +1,10 @@
-from telnetlib import GA
 from TB_model import TB_model
 from TB_io import read_TB_model
 import operators as ops
 from Hk import *
 from calculators import *
+
+jax.config.update("jax_enable_x64", True)
 
 model = read_TB_model("TB_Cu.npz")
 #model.set_EF("/path/to/QE output")

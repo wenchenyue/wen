@@ -3,9 +3,6 @@ import jax
 import jax.numpy as jnp
 from TB_model import TB_model
 
-
-# using double precision
-jax.config.update("jax_enable_x64", True)
 # K space==============================BEGIN
 def build_k_path(model:TB_model,
                  k_points:jnp.ndarray,

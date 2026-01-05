@@ -3,13 +3,9 @@ import types
 import jax
 import jax.numpy as jnp
 from TB_model import TB_model
-from utility import fermi_dirac_vamp, fermi_dirac_derivative_vamp
+from utility import fermi_dirac_vamp, fermi_dirac_derivative_vamp,DEFAULT_TYPE_COMPLEX, DEFAULT_TYPE_REAL
 from Hk import make_k_hamiltonian_calculator, make_k_hamiltonian_velocity_calculator
 
-# using double precision
-jax.config.update("jax_enable_x64", True)
-DEFAULT_TYPE_COMPLEX = jnp.complex128
-DEFAULT_TYPE_REAL = jnp.float64
 
 # ==============================================================================
 # CALCULATORS MODULE

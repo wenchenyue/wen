@@ -1,11 +1,6 @@
-import jax
 import jax.numpy as jnp
+from utility import DEFAULT_TYPE_COMPLEX, DEFAULT_TYPE_REAL
 
-
-# using double precision
-jax.config.update("jax_enable_x64", True)
-DEFAULT_TYPE_COMPLEX = jnp.complex128
-DEFAULT_TYPE_REAL = jnp.float64
 
 
 num_ao = { # num of atomic orbitals for each orbital type, considering spin

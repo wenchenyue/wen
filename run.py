@@ -2,13 +2,9 @@
 from tqdm import trange
 import jax
 import jax.numpy as jnp
+from utility import DEFAULT_TYPE_COMPLEX, DEFAULT_TYPE_REAL
 
 
-
-
-jax.config.update("jax_enable_x64", True)
-DEFAULT_TYPE_COMPLEX = jnp.complex128
-DEFAULT_TYPE_REAL = jnp.float64
 
 def run_kps_gpu(
              kps:jnp.ndarray, # it should be on cpu at input
