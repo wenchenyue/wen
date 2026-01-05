@@ -85,13 +85,13 @@ class TB_model:
         from calculators import make_k_hamiltonian_velocity_calculator
         return make_k_hamiltonian_velocity_calculator(self)
     
-    def make_calc_inner(self,name:str,operator:jnp.ndarray):
+    def make_calc_inner(self,name:str,operator=None, H_gauge:bool=False):
         '''
         make a calculator for inner quantity
         return: a function, which takes Vec_k as input, and return inner quantity as output
         '''
         from calculators import make_calc_inner
-        self.all_calculators[name] = make_calc_inner(self,operator)
+        self.all_calculators[name] = make_calc_inner(self,operator, H_gauge)
         return self.all_calculators[name]    
     
     def make_calc_kubo(self,
@@ -99,7 +99,8 @@ class TB_model:
                         alpha:int = 0,#1st direction of kubo formula
                         beta:int  = 1,#2nd direction of kubo formula
                         Gamma:float = 0.025,# smearing width,in eV unit
-                        Operator:jnp.ndarray = None, # default is None, then calc Berry Curvature
+                        Operator= None, # default is None, then calc Berry Curvature
+                        H_gauge:bool=False, # whether the operator is in the Hamiltonian(band) basis
                        ):
         '''
         make a calculator for kubo quantity
@@ -107,7 +108,7 @@ class TB_model:
         and return kubo quantity as output
         '''
         from calculators import make_calc_kubo
-        self.all_calculators[name] = make_calc_kubo(self,alpha,beta,Gamma,Operator)
+        self.all_calculators[name] = make_calc_kubo(self,alpha,beta,Gamma,Operator,H_gauge)
         return self.all_calculators[name] 
     
     def make_calc_OBC(self,

@@ -11,10 +11,6 @@ jax.config.update("jax_enable_x64", True)
 DEFAULT_TYPE_COMPLEX = jnp.complex128
 DEFAULT_TYPE_REAL = jnp.float64
 
-# Calculators==================Begin
-# (E_k, Vec_k, velocity_k)-dependent calculators
-
-# one operator
 # ==============================================================================
 # CALCULATORS MODULE
 # ==============================================================================
@@ -34,184 +30,6 @@ levi_civita = jnp.array([
 # ==============================================================================
 # (E_k, Vec_k, velocity_k)-DEPENDENT CALCULATORS
 # ==============================================================================
-
-def make_calc_inner(model: TB_model, Operator = None, H_gauge: bool = False):
-    """
-    Create a calculator for computing the inner product of an operator with wavefunctions.
-    
-    This calculator computes <ψ_n(k)|O|ψ_n(k)> for each band n, where O is the given operator.
-    The result represents the expectation value of the operator in each eigenstate.
-    
-    Common use cases:
-    - If O is the identity matrix: computes occupation numbers (cumulative DOS after Fermi scan)
-    - If O is a diagonal matrix with 1s for specific orbitals: computes partial DOS (PDOS)
-    - If O is any Hermitian operator: computes the expectation value of that observable
-    
-    Args:
-        model (TB_model): The tight-binding model class instance containing model parameters.
-        Operator (jnp.ndarray): The operator matrix in the orbital basis, shape (nwan, nwan).
-                               Must be a square matrix matching the number of Wannier functions.
-    
-    Returns:
-        function: A JIT-compiled calculator function with signature:
-                  (E_k, Vec_k, velocity_k) -> inner_product
-                  where:
-                    - E_k (jnp.ndarray): Eigenvalues, shape (nwan,)
-                    - Vec_k (jnp.ndarray): Eigenvectors, shape (nwan, nwan)
-                    - velocity_k (jnp.ndarray): Velocity operator, shape (nwan, nwan, 3)
-                  Returns:
-                    inner_product (jnp.ndarray): Real expectation values, shape (nwan,)
-    
-    Raises:
-        AssertionError: If Operator shape does not match (nwan, nwan).
-    
-    Notes:
-        - The velocity_k parameter is ignored in this calculation but kept for interface consistency.
-        - The result is always real because we're computing expectation values of Hermitian operators.
-        - After Fermi-Dirac smearing, states below EF contribute 1, above EF contribute 0.
-    
-
-    """
-    nwan = model.nwan
-
-    if Operator is None:
-        Operator_func = lambda *args, **kwargs: jnp.eye(nwan)
-    elif isinstance(Operator,jnp.ndarray):
-        assert Operator.shape == (nwan,nwan), f"Operator shape should be ({nwan},{nwan}), but got {Operator.shape}"
-        Operator_func = lambda *args, **kwargs: Operator
-    elif isinstance(Operator,types.FunctionType): 
-        # Only custom functions are supported, built-in functions and callable objects are not.
-        Operator_func = Operator
-        # useful check for developers to ensure the function signature is correct
-        import inspect
-        sig = inspect.signature(Operator_func)
-        print(f"custom Operator function {Operator_func.__name__}, parameters: {sig}")
-    else:
-        raise ValueError(f"Operator type {type(Operator)} is not supported. Only None, jnp.ndarray, and custom functions are allowed.")
-
-    def _calculator(
-        E_k:jnp.ndarray,
-        Vec_k:jnp.ndarray,
-        velocity_k:jnp.ndarray,
-        ):
-        """
-        Calculate the inner product <ψ_n(k)|O|ψ_n(k)> for each band n.
-        
-        Args:
-            E_k (jnp.ndarray): Eigenvalues of H(k), shape (nwan,). Ignored in this calculation.
-            Vec_k (jnp.ndarray): Eigenvectors of H(k), shape (nwan, nwan). Columns are eigenvectors.
-            velocity_k (jnp.ndarray): Velocity operator, shape (nwan, nwan, 3). Ignored in this calculation.
-        
-        Returns:
-            jnp.ndarray: Real expectation values for each band, shape (nwan,).
-        """
-        # Compute <ψ_n|O|ψ_n> = Σ_{i,j} ψ_n*[i] * O[i,j] * ψ_n[j]
-        # where:
-        #   Vec_k.conj().T[i,j] = ψ_n*[j] (transpose of conjugate)
-        #   Operator[j,k] = O[j,k]
-        #   Vec_k[k,i] = ψ_n[i]
-        #   Result[i] = Σ_{j,k} ψ_n*[j] * O[j,k] * ψ_n[k] = <ψ_n|O|ψ_n>
-
-        if H_gauge: # operator in the Hamiltonian(band) basis
-            return jnp.real(jnp.diag(Operator_mat))
-        else: # operator in the orbital(wannier) basis
-            Operator_mat = Operator_func(E_k, Vec_k, velocity_k)
-            inner_product = jnp.einsum('ij,jk,ki->i', Vec_k.conj().T, Operator_mat, Vec_k, optimize='optimal')
-            return jnp.real(inner_product)
-    return _calculator
-
-
-
-
-# modern theory of orbital magnetism
-def make_calc_mag_modern(model: TB_model, gamma: int = 2):
-    """
-    Create a calculator for the intrinsic orbital magnetization using modern theory.
-    
-    This calculator implements the modern theory of orbital magnetism based on Pezo et al.
-    [PHYSICAL REVIEW B 106, 104414 (2022)], which expresses the orbital magnetic moment
-    in terms of the Berry curvature and velocity operators.
-    
-    The orbital magnetic moment for band n at k-point k in direction gamma is:
-    M_orb(n,k,gamma) = Im[0.5 * Σ_{q≠n} (1/(E_qk - E_nk)) * 
-                        (<n|v_α|q><q|v_β|n> - <n|v_β|q><q|v_α|n>)]
-    
-    This is equivalent to the diagonal elements of the orbital magnetization matrix
-    computed by make_calc_mag_matrix().
-    
-    Args:
-        model (TB_model): The tight-binding model class instance containing model parameters.
-        gamma (int, optional): Direction of magnetization (0=x, 1=y, 2=z). Default is 2 (z).
-    
-    Returns:
-        function: A JIT-compiled calculator function with signature:
-                  (E_k, Vec_k, velocity_k) -> magnetization
-                  where:
-                    - E_k (jnp.ndarray): Eigenvalues, shape (nwan,)
-                    - Vec_k (jnp.ndarray): Eigenvectors, shape (nwan, nwan)
-                    - velocity_k (jnp.ndarray): Velocity operator, shape (nwan, nwan, 3)
-                  Returns:
-                    magnetization (jnp.ndarray): Orbital magnetic moments, shape (nwan,)
-    
-    Notes:
-        - Only the intrinsic part of the orbital magnetization is calculated.
-        - The velocity operator may include or exclude gauge potential (A) terms, which affects results.
-        - A small imaginary part (1e-12) is added to energy denominators to avoid division by zero.
-        - The result is purely imaginary, so we take the imaginary part to get the physical quantity.
-    
-    References:
-        Pezo et al., PHYSICAL REVIEW B 106, 104414 (2022), Eq. (6)
-    
-    """
-    print(f"modern theory of orbital magnetism, caution: only calculate the intrinsic part")
-    alpha, beta = levi_civita[gamma]
-    
-    def _calculator(
-        E_k:jnp.ndarray,
-        Vec_k:jnp.ndarray,
-        velocity_k:jnp.ndarray,
-        ):
-        """
-        Calculate the orbital magnetization for each band at a given k-point.
-        
-        Args:
-            E_k (jnp.ndarray): Eigenvalues of H(k), shape (nwan,).
-            Vec_k (jnp.ndarray): Eigenvectors of H(k), shape (nwan, nwan). Columns are eigenvectors.
-            velocity_k (jnp.ndarray): Velocity operator in orbital basis, shape (nwan, nwan, 3).
-        
-        Returns:
-            jnp.ndarray: Orbital magnetic moments for each band, shape (nwan,).
-        """
-        Vec_k_dagger = Vec_k.conj().T
-        
-        # Transform velocity operators to band basis: v_band = U^† * v_orb * U
-        v_alpha = Vec_k_dagger @ velocity_k[:,:,alpha] @ Vec_k
-        v_beta = Vec_k_dagger @ velocity_k[:,:,beta] @ Vec_k
-        
-        # Energy differences: Ediff[q, n] = E_q - E_n
-        Ediff = E_k[:,None] - E_k[None,:]
-        
-        # Green's function: G[q, n] = 1/(E_q - E_n)
-        # Small imaginary part (1e-12j) avoids division by zero
-        Gqn = 1 / (Ediff + 1e-12*1j)
-        
-        # Set diagonal elements to 0 to exclude q=n terms (no intraband contribution)
-        Gqn = jnp.fill_diagonal(Gqn, 0.0, inplace=False)
-        
-        # Compute cross product terms in direction gamma: v_α × v_β
-        # term1[n] = Σ_q G[q,n] * v_α[n,q] * v_β[q,n]
-        cross_term1 = jnp.einsum("qn,nq,qn->n", Gqn, v_alpha, v_beta, optimize='optimal')
-        
-        # term2[n] = Σ_q G[q,n] * v_β[n,q] * v_α[q,n]
-        cross_term2 = jnp.einsum("qn,nq,qn->n", Gqn, v_beta, v_alpha, optimize='optimal')
-        
-        # Orbital magnetization: M = 0.5 * Im(cross_term1 - cross_term2)
-        # Note: cross_term2 = cross_term1* (complex conjugate)
-        # So M = Im(cross_term1) is equivalent
-        magnetism = jnp.imag((cross_term1 - cross_term2) / 2)
-        return magnetism 
-    return _calculator
-
 
 def make_calc_mag_matrix(model: TB_model, gamma: int = 2):
     """
@@ -322,63 +140,73 @@ def make_calc_mag_matrix(model: TB_model, gamma: int = 2):
         return magnetism_matrix
     return _calculator
 
-def make_calc_OBC_modern(
-    model: TB_model,
-    alpha: int = 0,  # 1st direction of Kubo formula
-    beta: int = 1,   # 2nd direction of Kubo formula
-    gamma: int = 2,  # direction of orbital magnetization moment
-    Gamma: float = 0.025,  # smearing width, in eV unit
-    ):
+
+
+
+
+def make_calc_inner(model: TB_model, Operator = None, H_gauge: bool = False):
     """
-    Create a calculator for the Orbital Berry Curvature (OBC) using modern theory.
+    Create a calculator for computing the inner product of an operator with wavefunctions.
     
-    This calculator computes the orbital Berry curvature for orbital Hall conductivity (OHC)
-    calculations, based on the modern theory of orbital magnetization by Pezo et al.
-    [PHYSICAL REVIEW B 106, 104414 (2022)], Eqs. (8) and (9).
+    This calculator computes <ψ_n(k)|O|ψ_n(k)> for each band n, where O is the given operator.
+    The result represents the expectation value of the operator in each eigenstate.
     
-    The orbital Berry curvature O_BC[n,k,α,β,γ] is defined as:
-    
-    O_BC[n,k,α,β,γ] = -2 * Im Σ_{m≠n} [1/(E_mk - E_nk)^2] * 
-                       [Σ_q (v_α[n,q] * M_γ[q,m] + M_γ[n,q] * v_α[q,m])/2 * v_β[m,n] ]
-                    = -2 * Im Σ_{m≠n} [1/(E_mk - E_nk)^2] * 0.5{v_α, M_γ}[n,m] * v_β[m,n]
-    where:
-    - α, β: directions in the Kubo formula (response and perturbation directions)
-    - γ: direction of the orbital magnetization moment
-    - M_γ: orbital magnetization matrix in direction γ
-    - v_α, v_β: velocity operators in directions α and β
-    - Γ (Gamma): Lorentzian broadening parameter for energy denominators
-    
-    Note: A negative sign is included in front of the OBC, which differs from the
-    original formula in Pezo et al. 
+    Common use cases:
+    - If O is the identity matrix: computes occupation numbers (cumulative DOS after Fermi scan)
+    - If O is a diagonal matrix with 1s for specific orbitals: computes partial DOS (PDOS)
+    - If O is any Hermitian operator: computes the expectation value of that observable
     
     Args:
         model (TB_model): The tight-binding model class instance containing model parameters.
-        alpha (int, optional): First direction index (0=x, 1=y, 2=z). Default is 0.
-        beta (int, optional): Second direction index (0=x, 1=y, 2=z). Default is 1.
-        gamma (int, optional): Magnetization direction (0=x, 1=y, 2=z). Default is 2 (z).
-        Gamma (float, optional): Smearing width (broadening) in eV. Default is 0.025 eV.
+        Operator (jnp.ndarray or function): The operator matrix or function. 
+                               - If jnp.ndarray: shape (nwan, nwan), in orbital basis
+                               - If function: callable with signature (E_k, Vec_k, velocity_k) -> jnp.ndarray
+                               - If None: uses identity matrix
+        H_gauge (bool): Gauge choice for the operator representation.
+                       - If True: Operator is already in the band (Hamiltonian) basis, 
+                                  directly take diagonal elements
+                       - If False: Operator is in the orbital (Wannier) basis, 
+                                   transform to band basis using eigenvectors
+                       Default is False.
     
     Returns:
         function: A JIT-compiled calculator function with signature:
-                  (E_k, Vec_k, velocity_k) -> orbital_berry_curvature
+                  (E_k, Vec_k, velocity_k) -> inner_product
                   where:
                     - E_k (jnp.ndarray): Eigenvalues, shape (nwan,)
                     - Vec_k (jnp.ndarray): Eigenvectors, shape (nwan, nwan)
                     - velocity_k (jnp.ndarray): Velocity operator, shape (nwan, nwan, 3)
                   Returns:
-                    orbital_berry_curvature (jnp.ndarray): O_BC[n] for each band, shape (nwan,)
+                    inner_product (jnp.ndarray): Real expectation values, shape (nwan,)
+    
+    Raises:
+        AssertionError: If Operator is jnp.ndarray and shape does not match (nwan, nwan).
+        ValueError: If Operator type is not supported.
     
     Notes:
-        - This calculator internally uses make_calc_mag_matrix() to compute M_γ.
-        - The smearing parameter Γ controls the energy window for interband transitions.
-        - The result is purely imaginary, so we take the imaginary part to get the physical quantity.
-        - For orbital Hall conductivity, integrate over k-space and sum over occupied bands.
-    
-    References:
-        Pezo et al., PHYSICAL REVIEW B 106, 104414 (2022)
+        - The velocity_k parameter is ignored in this calculation but kept for interface consistency.
+        - The result is always real because we're computing expectation values of Hermitian operators.
+        - After Fermi-Dirac smearing, states below EF contribute 1, above EF contribute 0.
+        - When H_gauge=True, Operator is assumed to be diagonal in the band basis (only diagonal elements are taken).
+        - When H_gauge=False and Operator is a function, it can be k-dependent.
+
     """
-    # Create calculator for orbital magnetization matrix
-    mag_calculator = make_calc_mag_matrix(model, gamma)
+    nwan = model.nwan
+
+    if Operator is None:
+        Operator_func = lambda E_k, Vec_k, Vel_k: jnp.eye(nwan)
+    elif isinstance(Operator,jnp.ndarray):
+        assert Operator.shape == (nwan,nwan), f"Operator shape should be ({nwan},{nwan}), but got {Operator.shape}"
+        Operator_func = lambda E_k, Vec_k, Vel_k: Operator
+    elif isinstance(Operator,types.FunctionType): 
+        # Only custom functions are supported, built-in functions and callable objects are not.
+        Operator_func = Operator
+        # useful check for developers to ensure the function signature is correct
+        import inspect
+        sig = inspect.signature(Operator_func)
+        print(f"custom Operator function {Operator_func.__name__}, parameters: {sig}")
+    else:
+        raise ValueError(f"Operator type {type(Operator)} is not supported. Only None, jnp.ndarray, and custom functions are allowed.")
 
     def _calculator(
         E_k:jnp.ndarray,
@@ -386,40 +214,31 @@ def make_calc_OBC_modern(
         velocity_k:jnp.ndarray,
         ):
         """
-        Calculate the Orbital Berry Curvature for a given k-point.
+        Calculate the inner product <ψ_n(k)|O|ψ_n(k)> for each band n.
         
         Args:
-            E_k (jnp.ndarray): Eigenvalues of H(k), shape (nwan,).
+            E_k (jnp.ndarray): Eigenvalues of H(k), shape (nwan,). Ignored in this calculation.
             Vec_k (jnp.ndarray): Eigenvectors of H(k), shape (nwan, nwan). Columns are eigenvectors.
-            velocity_k (jnp.ndarray): Velocity operator in orbital basis, shape (nwan, nwan, 3).
+            velocity_k (jnp.ndarray): Velocity operator, shape (nwan, nwan, 3). Ignored in this calculation.
         
         Returns:
-            jnp.ndarray: The orbital Berry curvature for each band, shape (nwan,).
+            jnp.ndarray: Real expectation values for each band, shape (nwan,).
         """
-        Vec_k_dagger = Vec_k.conj().T
-        
-        # Transform velocity operators to band basis
-        v_alpha = Vec_k_dagger @ velocity_k[:,:,alpha] @ Vec_k
-        v_beta = Vec_k_dagger @ velocity_k[:,:,beta] @ Vec_k
-        
-        # Calculate orbital magnetization matrix (Eq. 6 in Pezo et al.)
-        mag_matrix = mag_calculator(E_k, Vec_k, velocity_k)
-        
-        # Compute symmetrized current operator J_α = (v_α @ M_γ + M_γ @ v_α)/2
-        # This is Eq. (9) in Pezo et al.
-        J_alpha = (1/2) * (v_alpha @ mag_matrix + mag_matrix @ v_alpha)
-        
-        # Energy denominator with Lorentzian broadening: 1/[(E_m - E_n)^2 + Γ^2]
-        Ediff2 = (E_k[:,None] - E_k[None,:])**2 + Gamma**2 + 1e-12
-        # Set diagonal elements to 0 to exclude m=n terms (no intraband contribution)
-        G = jnp.fill_diagonal(1.0/Ediff2, 0.0, inplace=False)
-        
-        # Compute orbital Berry curvature: O_BC[n] = -2 * Im[Σ_m G[m,n] * J_α[n,m] * v_β[m,n]]
-        # Using einsum: "nm,nm,mn->n" means Σ_{n,m} G[n,m] * J_α[n,m] * v_β[m,n]
-        OBC = -2 * jnp.imag(jnp.einsum("nm,nm,mn->n", G, J_alpha, v_beta))
-        
-        return OBC
+        # Compute <ψ_n|O|ψ_n> = Σ_{i,j} ψ_n*[i] * O[i,j] * ψ_n[j]
+        # where:
+        #   Vec_k.conj().T[i,j] = ψ_n*[j] (transpose of conjugate)
+        #   Operator[j,k] = O[j,k]
+        #   Vec_k[k,i] = ψ_n[i]
+        #   Result[i] = Σ_{j,k} ψ_n*[j] * O[j,k] * ψ_n[k] = <ψ_n|O|ψ_n>
+
+        Operator_mat = Operator_func(E_k, Vec_k, velocity_k)
+        if H_gauge: # operator in the Hamiltonian(band) basis
+            return jnp.real(jnp.diag(Operator_mat))
+        else: # operator in the orbital(wannier) basis
+            inner_product = jnp.einsum('ij,jk,ki->i', Vec_k.conj().T, Operator_mat, Vec_k, optimize='optimal')
+            return jnp.real(inner_product)
     return _calculator
+
 
 
 # a simpler version of kubo calculator
@@ -437,7 +256,7 @@ def make_calc_kubo(
     This function implements the Kubo formula for calculating linear response coefficients
     in tight-binding models. It can compute various transport coefficients including:
     
-    1. **Berry Curvature** (intrinsic anomalous Hall conductivity) when Operator=None
+    1. **Berry Curvature** (intrinsic anomalous Hall conductivity)
     2. **Operator-specific Berry Curvature** (e.g., spin Hall conductivity) when Operator is provided
     
     The Kubo formula calculates the response function as:
@@ -452,7 +271,7 @@ def make_calc_kubo(
     
     **Physical Interpretation:**
     
-    - For α=β=x,y,z and Operator=None: Computes the Berry curvature tensor component Ω_xy
+    - For α=0, β=1 (x,y) with Operator=I (identity): Computes the Berry curvature tensor component Ω_xy
     - For Operator=σ_z (spin operator): Computes the spin Berry curvature for spin Hall effect
     - The result is related to the Hall conductivity via σ_xy = (e²/ℏ) * Σ_n f_n * Ω_n
     
@@ -461,12 +280,15 @@ def make_calc_kubo(
     The calculation follows these steps:
     
     1. Transform velocity operators to band basis:
-       v_α^band = U^† v_α^orb U
        v_β^band = U^† v_β^orb U
     
-    2. If Operator is provided, construct symmetrized current:
-       J_O = 1/2 (Operator · v_α + v_α · Operator)
-       Then transform to band basis: J_O^band = U^† J_O U
+    2. Construct the current operator J_α based on H_gauge parameter:
+       - If H_gauge=True (Operator in band basis):
+         v_α^band = U^† v_α^orb U
+         J_α^band = 1/2 * (Operator_mat @ v_α^band + v_α^band @ Operator_mat)
+       - If H_gauge=False (Operator in orbital basis):
+         J_O^orb = 1/2 * (Operator_mat @ v_α^orb + v_α^orb @ Operator_mat)
+         J_α^band = U^† J_O^orb U
     
     3. Compute energy denominator with Lorentzian broadening:
        G_{nm} = 1 / [(E_n - E_m)^2 + Γ^2]
@@ -504,12 +326,18 @@ def make_calc_kubo(
         Typical values range from 0.01 to 0.1 eV.
         Default is 0.025 eV.
     
-    Operator : jnp.ndarray, optional
-        Optional operator matrix in the orbital basis, shape (nwan, nwan).
-        If provided, calculates the Berry curvature associated with this operator
-        using the symmetrized current operator J_O = 1/2{Operator, v_α}.
-        
+    Operator : jnp.ndarray or function, optional
+        Optional operator matrix or function for computing operator-specific Berry curvature.
+        - If jnp.ndarray: shape (nwan, nwan), can be in orbital or band basis depending on H_gauge
+        - If function: callable with signature (E_k, Vec_k, velocity_k) -> jnp.ndarray
+        - If None: uses identity matrix (calculates standard Berry curvature)
         Default is None.
+    
+    H_gauge : bool, optional
+        Gauge choice for the Operator representation.
+        - If True: Operator is already in the band (Hamiltonian) basis
+        - If False: Operator is in the orbital (Wannier) basis
+        Default is False.
     
     **Returns:**
     
@@ -542,22 +370,30 @@ def make_calc_kubo(
        of the calculation and should be chosen carefully based on the system.
     
     2. **Symmetrized Current Operator:**
-       When Operator is provided, the current operator is symmetrized as
-       J_O = 1/2{Operator, v_α} to ensure Hermiticity and physical consistency.
-       This is particularly important for spin and orbital operators.
+       The current operator is always symmetrized as J_α = 1/2{Operator, v_α} 
+       (or 1/2{I, v_α} = v_α when Operator=I) to ensure Hermiticity and 
+       physical consistency. The H_gauge parameter determines whether the 
+       symmetrization happens in the orbital basis (H_gauge=False) or in the 
+       band basis (H_gauge=True).
     
     3. **Band Summation:**
        The calculation sums over all bands m ≠ n. The diagonal terms (m=n) are
        excluded as they don't contribute to interband transitions in the linear
        response regime.
+    
+    4. **Operator Flexibility:**
+       The Operator can be provided as a static matrix (jnp.ndarray) or as a 
+       function that returns a k-dependent operator. When using H_gauge=True,
+       the Operator is expected to be already in the band basis, while 
+       H_gauge=False expects the Operator in the orbital basis.
       
     """
     nwan = model.nwan
     if Operator is None:
-        Operator_func = lambda *args, **kwargs: jnp.eye(nwan)
+        Operator_func = lambda E_k, Vec_k, Vel_k: jnp.eye(nwan)
     elif isinstance(Operator,jnp.ndarray):
         assert Operator.shape == (nwan,nwan), f"Operator shape should be ({nwan},{nwan}), but got {Operator.shape}"
-        Operator_func = lambda *args, **kwargs: Operator
+        Operator_func = lambda E_k, Vec_k, Vel_k: Operator
     elif isinstance(Operator,types.FunctionType): 
         # Only custom functions are supported, built-in functions and callable objects are not.
         Operator_func = Operator  
@@ -566,7 +402,7 @@ def make_calc_kubo(
         sig = inspect.signature(Operator_func)
         print(f"custom Operator function {Operator_func.__name__}, parameters: {sig}")
     else:
-        raise ValueError(f"Operator type {type(Operator)} is not supported. Only None, jnp.ndarray, and custom functions are allowed.")  # pyright: ignore[reportUnreachable]
+        raise ValueError(f"Operator type {type(Operator)} is not supported. Only None, jnp.ndarray, and custom functions are allowed.")  
 
     def _calculator(
         E_k: jnp.ndarray,
@@ -614,7 +450,6 @@ def make_calc_kubo(
         # where U is the eigenvector matrix and v_beta_orb is the velocity
         # operator in the orbital basis
         v_beta = Vec_k_dagger @ velocity_k[:,:,beta] @ Vec_k
-        # v_alpha will be calculated later depending on whether Operator is present
 
         # Calculate the energy denominator factor with Lorentzian broadening
         # denominator[n, m] = (E_n - E_m)^2 + Gamma^2
@@ -629,24 +464,17 @@ def make_calc_kubo(
         G = jnp.fill_diagonal(1.0/denominator, 0.0, inplace=False)
 
         Operator_mat = Operator_func(E_k, Vec_k, velocity_k)
-        if  H_gauge:# operator in the Hamiltonian(band) basis
-            v_alpha = Vec_k_dagger @ velocity_k[:,:,alpha] @ Vec_k
-            v_alpha = 0.5 * (Operator_mat @ v_alpha + v_alpha @ Operator_mat)
-        else: # operator in the orbital basis
-            J_O = 0.5 * (Operator_mat @ velocity_k[:,:,alpha] + velocity_k[:,:,alpha] @ Operator_mat)   
-            v_alpha = Vec_k_dagger @ J_O @ Vec_k
-
-        if Operator is None:
-            # Pure Berry Curvature calculation
-            # v_alpha_band = U^† * v_alpha_orb * U
-            # Transform the alpha-component of velocity to band basis
-            v_alpha = Vec_k_dagger @ velocity_k[:,:,alpha] @ Vec_k
+        
+        # Construct the current operator J_α based on H_gauge parameter
+        if H_gauge:
+            # Operator is in the Hamiltonian(band) basis
+            # First transform v_α to band basis, then symmetrize with Operator
+            v_alpha_band = Vec_k_dagger @ velocity_k[:,:,alpha] @ Vec_k
+            v_alpha = 0.5 * (Operator_mat @ v_alpha_band + v_alpha_band @ Operator_mat)
         else:
-            # Berry Curvature of an Operator (e.g., Spin Hall)
-            # Construct the symmetrized current operator: J_O = 1/2 * {Operator, v_alpha}
-            # The symmetrization ensures Hermiticity and physical consistency
-            J_O = 0.5 * (Operator @ velocity_k[:,:,alpha] + velocity_k[:,:,alpha] @ Operator)
-            # Transform J_O to the band basis: J_O_band = U^† * J_O * U
+            # Operator is in the orbital(wannier) basis
+            # First symmetrize Operator with v_α in orbital basis, then transform to band basis
+            J_O = 0.5 * (Operator_mat @ velocity_k[:,:,alpha] + velocity_k[:,:,alpha] @ Operator_mat)
             v_alpha = Vec_k_dagger @ J_O @ Vec_k
 
         # Calculate the Kubo formula sum:
@@ -677,8 +505,9 @@ def make_calc_kubo(
     return _calculator
 
 def make_calc_intra(model:TB_model,
-                beta:int=2, # direction of E field
-                Operator:jnp.ndarray=None,
+                beta:int = 2, # direction of E field
+                Operator = None,# matrix or function
+                H_gauge:bool = False, # operator in the Hamiltonian(band) basis
                 ):
     """
     Create a calculator for intraband contribution to an operator.
@@ -690,6 +519,12 @@ def make_calc_intra(model:TB_model,
     ```
     O_intra(k,n,beta) = <u(n,k)|v_beta|u(n,k)> * <u(n,k)|O|u(n,k)>
     ```
+    
+    **Physical Interpretation:**
+    This formula represents the intraband (Drude-like) contribution to transport
+    properties. The first term ⟨u(n,k)|v_β|u(n,k)⟩ is the intraband velocity,
+    and the second term ⟨u(n,k)|O|u(n,k)⟩ is the expectation value of the operator
+    O in the band n state.
     
     **Important:** This calculator must be used with scanner_type='FD_deri' in
     make_calc_all to compute Fermi surface integrals properly.
@@ -703,10 +538,18 @@ def make_calc_intra(model:TB_model,
         Direction of the electric field (0=x, 1=y, 2=z).
         Default is 2 (z-direction).
     
-    Operator : jnp.ndarray, optional
-        Operator matrix in orbital basis, shape (nwan, nwan).
-        If None, uses identity matrix.
+    Operator : jnp.ndarray, callable, or None, optional
+        Operator matrix or function for computing the operator expectation value.
+        - If jnp.ndarray: shape (nwan, nwan), can be in orbital or band basis depending on H_gauge
+        - If callable: custom function with signature (E_k, Vec_k, Vel_k) -> jnp.ndarray
+        - If None: uses identity matrix (calculates velocity term only)
         Default is None.
+    
+    H_gauge : bool, optional
+        Gauge choice for the Operator representation.
+        - If True: Operator is already in the Hamiltonian (band) basis
+        - If False: Operator is in the orbital (Wannier) basis and will be transformed
+        Default is False.
     
     **Returns:**
     
@@ -721,29 +564,70 @@ def make_calc_intra(model:TB_model,
     print("calculate intraband contribution, be sure use 'FD_deri' scanner")
 
     nwan = model.nwan
-    assert beta in [0,1,2], "beta must be 0, 1, or 2"
     if Operator is None:
-        print("Warning: Operator is None, use identity matrix instead")
-        Operator = jnp.eye(nwan)
+        Operator_func = lambda E_k, Vec_k, Vel_k: jnp.eye(nwan)
+    elif isinstance(Operator,jnp.ndarray):
+        assert Operator.shape == (nwan,nwan), f"Operator shape should be ({nwan},{nwan}), but got {Operator.shape}"
+        Operator_func = lambda E_k, Vec_k, Vel_k: Operator
+    elif isinstance(Operator,types.FunctionType): 
+        # Only custom functions are supported, built-in functions and callable objects are not.
+        Operator_func = Operator
+        # useful check for developers to ensure the function signature is correct
+        import inspect
+        sig = inspect.signature(Operator_func)
+        print(f"custom Operator function {Operator_func.__name__}, parameters: {sig}")
     else:
-        assert Operator.shape == (nwan,nwan), f"Operator shape must be ({nwan},{nwan}), but got {Operator.shape}"
-    
+        raise ValueError(f"Operator type {type(Operator)} is not supported. Only None, jnp.ndarray, and custom functions are allowed.")
+
     def _calculator(E_k:jnp.ndarray, Vec_k:jnp.ndarray, Vel_k:jnp.ndarray):
         """
         Calculate intraband contribution for each band.
         
+        This function computes the intraband contribution O_intra(n,β) for each band n
+        using the formula: O_intra(n,β) = v_β(n) * O(n)
+        where v_β(n) = ⟨u(n,k)|v_β|u(n,k)⟩ is the intraband velocity and
+        O(n) = ⟨u(n,k)|O|u(n,k)⟩ is the operator expectation value.
+        
         Args:
-            E_k: Eigenvalues, shape (nwan,). Unused, kept for interface.
-            Vec_k: Eigenvectors, shape (nwan, nwan).
-            Vel_k: Velocity operator, shape (nwan, nwan, 3).
+            E_k: jnp.ndarray, shape (nwan,)
+                Eigenvalues of the Hamiltonian at k-point.
+                Kept for interface consistency but not used in calculation.
+            
+            Vec_k: jnp.ndarray, shape (nwan, nwan)
+                Eigenvectors of the Hamiltonian at k-point.
+                Each column corresponds to an eigenvector |u(n,k)⟩.
+            
+            Vel_k: jnp.ndarray, shape (nwan, nwan, 3)
+                Velocity operator in orbital basis for all three directions.
+                Vel_k[:,:,β] gives the velocity operator v_β in the β direction.
         
         Returns:
-            jnp.ndarray: Intraband contribution for each band, shape (nwan,).
+            jnp.ndarray, shape (nwan,)
+                Intraband contribution O_intra(n,β) for each band n.
+                Computed as the product of intraband velocity and operator expectation value.
         """
+        # Get the operator matrix (either static or from custom function)
+        Operator_mat = Operator_func(E_k, Vec_k, Vel_k)
+        
+        # Compute conjugate transpose of eigenvector matrix
         Vec_k_dagger = Vec_k.conj().T
-        v_beta = jnp.einsum('ij,jk,ki->i', Vec_k_dagger, Vel_k[:,:,beta], Vec_k) # nwan
-        O_term = jnp.einsum('ij,jk,ki->i', Vec_k_dagger, Operator, Vec_k) # nwan
+        
+        # Calculate intraband velocity v_β(n) = ⟨u(n,k)|v_β|u(n,k)⟩
+        # Using einsum: 'ij,jk,ki->i' performs the matrix multiplication
+        # and takes diagonal elements to get expectation values
+        v_beta = jnp.einsum('ij,jk,ki->i', Vec_k_dagger, Vel_k[:,:,beta], Vec_k)
+        
+        # Calculate operator expectation value O(n) = ⟨u(n,k)|O|u(n,k)⟩
+        # based on H_gauge parameter
+        if H_gauge:
+            # Operator is already in the Hamiltonian (band) basis
+            O_term = Operator_mat
+        else:
+            # Operator is in the orbital (Wannier) basis, need to transform to band basis
+            # O(n) = ⟨u(n,k)|O_orb|u(n,k)⟩
+            O_term = jnp.einsum('ij,jk,ki->i', Vec_k_dagger, Operator_mat, Vec_k)
 
+        # Calculate intraband contribution: O_intra(n,β) = v_β(n) * O(n)
         intra = v_beta * O_term
 
         return intra
@@ -894,49 +778,70 @@ def make_calc_all(model:TB_model,
         user-registered calculators for the given k-point. If Fermi scanning
         is enabled, results are weighted by the Fermi-Dirac distribution.
         
+        The calculation proceeds in two main steps:
+        1. Diagonalize the Hamiltonian to get band energies and wavefunctions
+        2. Apply each registered calculator to obtain physical quantities
+        
+        If kbT > 1e-9 (Fermi scanning enabled), the results are further weighted
+        by the Fermi-Dirac distribution to obtain temperature-dependent properties.
+        
         Args:
             k: jnp.ndarray, shape (3,)
                 k-point in reciprocal space (in units of 2π/a).
+                Coordinates should be in the same basis as the tight-binding model.
         
         Returns:
             jnp.ndarray
                 If scan=False: shape (1 + n_calculators, nwan)
-                    - Row 0: band energies E_n(k)
+                    - Row 0: band energies E_n(k) for each band n
                     - Row i+1: results of calculator i for each band n
                 
                 If scan=True: shape (1 + n_calculators, n_fermi)
-                    - Row 0: total energy Σ_n f_n(E_F) * E_n(k)
+                    - Row 0: total energy Σ_n f_n(E_F) * E_n(k) weighted by Fermi-Dirac
                     - Row i+1: Σ_n f_n(E_F) * calculator_result_i_n
                     - Columns correspond to different Fermi levels in E_fermis
         """
-        # n_calc+1 * nwan
+        # Initialize result array: (n_calculators + 1) × nwan
+        # Extra row is for band energies
         result_bands = jnp.zeros((shape1, nwan), dtype=DEFAULT_TYPE_REAL)
+        
         if shape1 == 1:
             # Only calculate energy (no calculators registered)
             Hk = calculator_Hk(k)
             E_k = jnp.linalg.eigvalsh(Hk)  # nwan
             result_bands = result_bands.at[0].set(E_k)
         else:
-            # Calculate Hamiltonian and velocity
+            # Calculate Hamiltonian and velocity operators
             Hk, velocity_k = calculator_Hk(k)
+            
             # Diagonalize to get eigenvalues and eigenvectors
+            # E_k: band energies E_n(k), Vec_k: eigenvectors |u_n(k)⟩
             E_k, Vec_k = jnp.linalg.eigh(Hk)
-            # Store band energies
+            
+            # Store band energies in first row
             result_bands = result_bands.at[0].set(E_k)
+            
             # Run all registered calculators
             for i, func in enumerate(all_calculators_func):
+                # Each calculator computes: calc_n = f(E_k, Vec_k, velocity_k)
                 result_bands = result_bands.at[i+1].set(func(E_k, Vec_k, velocity_k))
         
         if not scan:
-            # Return results for all bands
+            # Return results for all bands (no Fermi-Dirac weighting)
             return result_bands
         else:
             # Apply Fermi-Dirac weighting using selected scanner
-            f_distribution = scanner_func(E_k, E_fermis, kbT)  # nwan * len(E_fermis)
+            # f_distribution[n, E_F] = f_n(E_F, kbT) for band n and Fermi level E_F
+            f_distribution = scanner_func(E_k, E_fermis, kbT)  # nwan × len(E_fermis)
+            
             # Weight each calculator result by Fermi-Dirac distribution
-            result_scan = result_bands[:, :, None] * f_distribution[None, :, :]  # n_calc+1 * nwan * len(E_fermi)
+            # Broadcasting: result_bands[:, :, None] is (n_calc+1) × nwan × 1
+            #               f_distribution[None, :, :] is 1 × nwan × len(E_fermi)
+            result_scan = result_bands[:, :, None] * f_distribution[None, :, :]
+            
             # Sum over bands to get Fermi-level-dependent results
-            return jnp.sum(result_scan, axis=1)  # n_calc+1 * len(E_fermi), sum over nwan
+            # Sum along axis=1 (band index) to get total contribution at each E_F
+            return jnp.sum(result_scan, axis=1)
     return _calculator
 
 
