@@ -110,14 +110,19 @@ class TB_model:
                         alpha:int = 0,#1st direction of kubo formula
                         beta:int  = 1,#2nd direction of kubo formula
                         gamma:int = 2,#direction of Orbital magnetization moment
-                        Gamma:float = 0.025,# smearing width,in eV unit
+                        Gamma:float = 0.025,# smearing width,in eV unit, default is 0.025
+                        H_gauge:bool=False, # whether the operator is in the Hamiltonian(band) basis
                         ):
         '''
         make a calculator for OBC modern version
         return: a function, which takes E_k, Vec_k, Vel_k as input, and return OBC as output
         '''
-        from calculators import make_calc_OBC_modern
-        self.all_calculators[name] = make_calc_OBC_modern(self,alpha,beta,gamma,Gamma)
+        #warn
+        print("Warning: OBC is using  modern version, using make_calc_mag_matrix to calculate Lz_modern")
+
+        from calculators import make_calc_kubo,make_calc_mag_matrix
+        Lz_modern = make_calc_mag_matrix(self,gamma)
+        self.all_calculators[name] = make_calc_kubo(self,alpha,beta,Gamma,Lz_modern,H_gauge)
         return self.all_calculators[name]
 
     def make_calc_all(self,
