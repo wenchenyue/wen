@@ -72,7 +72,6 @@ def run_kps_gpu(
     for i in trange(batch_num):
         # get batch k and put to gpu if available
         batch_k = batch_k_set[i]
-        batch_k = jax.device_put(batch_k, device=gpu_devices[0])
         
         ## running step
         if gpu_num > 1:
@@ -83,6 +82,7 @@ def run_kps_gpu(
             # to batch_size, n_operator, n_fermi(or n_band)
             result = result.reshape([batch_size,warm_shape[0],warm_shape[1]])
         else:
+            batch_k = jax.device_put(batch_k, device=gpu_devices[0])
             result = calculator_vmap(batch_k)
         
         ## post processing
