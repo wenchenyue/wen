@@ -323,8 +323,8 @@ def make_k_hamiltonian_velocity_calculator(model: TB_model,use_A:bool=False):
         Hk = (Hk + Hk.conj().T) / 2
 
         # Derivative of H(k) with respect to k: ∂H(k)/∂k_μ
-        # ∂H(k)/∂k_μ = i Σ_R e^{ik·(R+τ_ji)} (R_μ + τ_ji,μ) H(R)
-        # where τ_ji,μ = τ_j,μ - τ_i,μ is the μ-component of the center difference
+        # ∂H(k)/∂k_μ = i Σ_R e^{ik·(R+τ_ij)} (R_μ + τ_ij,μ) H(R)
+        # where τ_ij,μ = τ_j,μ - τ_i,μ is the μ-component of the center difference
         part1 = jnp.einsum('iab, i, ab, id -> abd',
                             HR,
                             Phase_R,

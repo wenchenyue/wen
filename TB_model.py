@@ -71,13 +71,13 @@ class TB_model:
         from calculators import make_k_hamiltonian_calculator
         return make_k_hamiltonian_calculator(self)
     
-    def make_k_hamiltonian_velocity_calculator(self):
+    def make_k_hamiltonian_velocity_calculator(self,use_A:bool=False):
         '''
         make a calculator for k-pt Hamiltonian velocity
         return: a function, which takes k as input, and return H(k) as output
         '''
         from calculators import make_k_hamiltonian_velocity_calculator
-        return make_k_hamiltonian_velocity_calculator(self)
+        return make_k_hamiltonian_velocity_calculator(self,use_A)
     
     def make_calc_inner(self,name:str,operator=None, H_gauge:bool=False):
         '''
