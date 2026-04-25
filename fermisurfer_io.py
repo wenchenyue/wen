@@ -40,17 +40,9 @@ def _write_header(f, nkx, nky, nkz, nband, recip_lattice):
         f.write(f"{r[0]:14.8f} {r[1]:14.8f} {r[2]:14.8f}\n")
 
 
-def _write_data_block(f, data_4d, nkx, nky, nkz, nband):
-    """
-    Write data in frmsf order: z fastest, then y, then x, then band.
-
-    data_4d: ndarray of shape (nkx, nky, nkz, nband)
-    """
-    for iband in range(nband):
-        for ix in range(nkx):
-            for iy in range(nky):
-                for iz in range(nkz):
-                    f.write(f"{data_4d[ix, iy, iz, iband]:15.8f}\n")
+def _write_data_block(f, data_4d):
+    flat = np.asarray(data_4d).transpose(3, 0, 1, 2).ravel()
+    np.savetxt(f, flat, fmt='%15.8f')
 
 
 def write_frmsf_energy(model, results, filepath):
@@ -79,7 +71,7 @@ def write_frmsf_energy(model, results, filepath):
 
     with open(filepath, 'w') as f:
         _write_header(f, nkx, nky, nkz, nwan, np.asarray(model.recip_lattice))
-        _write_data_block(f, energy_4d, nkx, nky, nkz, nwan)
+        _write_data_block(f, energy_4d)
 
     file_size_mb = nkx * nky * nkz * nwan * 18 / (1024 * 1024)
     print(f"Energy .frmsf written to {filepath} (~{file_size_mb:.1f} MB)")
@@ -119,8 +111,8 @@ def write_frmsf_quantity(model, results, calc_index, calc_name, filepath):
 
     with open(filepath, 'w') as f:
         _write_header(f, nkx, nky, nkz, nwan, np.asarray(model.recip_lattice))
-        _write_data_block(f, energy_4d, nkx, nky, nkz, nwan)
-        _write_data_block(f, quantity_4d, nkx, nky, nkz, nwan)
+        _write_data_block(f, energy_4d)
+        _write_data_block(f, quantity_4d)
 
     file_size_mb = nkx * nky * nkz * nwan * 2 * 18 / (1024 * 1024)
     print(f"{calc_name} .frmsf written to {filepath} (~{file_size_mb:.1f} MB)")
