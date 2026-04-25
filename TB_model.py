@@ -172,10 +172,25 @@ class TB_model:
         from K_space import build_k_path
         return build_k_path(self,k_points,ticks_label,length)
         
-    def run_all(self,job_name:str,batch_size:int=100,tabulate:bool=False):
+    def run_all(self,job_name:str,batch_size:int=100,tabulate:bool=False,frmsf:bool=False):
         '''
         run all calculators for given k points
+
+        Parameters
+        ----------
+        job_name : str
+            Name prefix for output files.
+        batch_size : int
+            Number of k-points per batch.
+        tabulate : bool
+            If True, retain per-k-point results (required for frmsf).
+        frmsf : bool
+            If True, export results in FermiSurfer .frmsf format.
+            Requires tabulate=True and kbT=0 (no Fermi scanning).
         '''
+        if frmsf and not tabulate:
+            raise ValueError("frmsf=True requires tabulate=True")
+
         res_dict ={}
         if self.k_points is None:
             raise ValueError("k_points is None, please make k mesh first")
@@ -209,6 +224,12 @@ class TB_model:
         with open(f"{job_name}.pkl", "wb") as f:
             pickle.dump(res_dict, f)
         print(f"save to {job_name}.pkl")
+
+        # export Fermisurfer .frmsf files
+        if frmsf:
+            from fermisurfer_io import write_frmsf_all
+            native_results = np.asarray(Results)
+            write_frmsf_all(self, native_results, job_name)
 
 # test pass
 if __name__ == "__main__":
