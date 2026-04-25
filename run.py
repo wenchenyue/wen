@@ -36,9 +36,9 @@ def run_kps_gpu_single(
     calculator_vmap = jax.vmap(calculator,in_axes=(0,))
 
     if tabulate:
-        Results = np.zeros([nk, warm_shape[0], warm_shape[1]], dtype=np.float64)
         mem_usage = nk * warm_up.nbytes / 1024 / 1024
         print(f"Use tabulating, estimated memory usage: {mem_usage:.3f} MB")
+        results_list = []
     else:
         Results = jnp.zeros(warm_shape, device=gpu_device, dtype=DEFAULT_TYPE_REAL)
 
@@ -59,11 +59,13 @@ def run_kps_gpu_single(
 
         if tabulate:
             result = jax.device_put(result, device=jax.devices("cpu")[0])
-            Results[i * batch_size:(i + 1) * batch_size] = np.asarray(result)
+            results_list.append(result)
         else:
             result = jnp.sum(result, axis=0)
             Results += jax.device_put(result, device=gpu_device)
 
+    if tabulate:
+        return np.concatenate(results_list, axis=0)
     return Results
 
 # multiple gpu version
@@ -96,9 +98,9 @@ def run_kps_gpu_multiple(
     calculator_pmap = jax.pmap(calculator_vmap)
 
     if tabulate:
-        Results = np.zeros([nk, warm_shape[0], warm_shape[1]], dtype=np.float64)
         mem_usage = nk * warm_up.nbytes / 1024 / 1024
         print(f"Use tabulating, estimated memory usage: {mem_usage:.3f} MB")
+        results_list = []
     else:
         Results = jnp.zeros(warm_shape, device=gpu_device, dtype=DEFAULT_TYPE_REAL)
 
@@ -123,11 +125,13 @@ def run_kps_gpu_multiple(
 
         if tabulate:
             result = jax.device_put(result, device=jax.devices("cpu")[0])
-            Results[i * batch_size:(i + 1) * batch_size] = np.asarray(result)
+            results_list.append(result)
         else:
             result = jnp.sum(result, axis=0)
             Results += jax.device_put(result, device=gpu_device)
 
+    if tabulate:
+        return np.concatenate(results_list, axis=0)
     return Results
 
 def run_kps_cpu(
@@ -158,9 +162,9 @@ def run_kps_cpu(
     calculator_vmap = jax.vmap(calculator,in_axes=(0,))
 
     if tabulate:
-        Results = np.zeros([nk, warm_shape[0], warm_shape[1]], dtype=np.float64)
         mem_usage = nk * warm_up.nbytes / 1024 / 1024
         print(f"Use tabulating, estimated memory usage: {mem_usage:.3f} MB")
+        results_list = []
     else:
         Results = jnp.zeros(warm_shape, device=cpu_device, dtype=DEFAULT_TYPE_REAL)
 
@@ -177,10 +181,13 @@ def run_kps_cpu(
         result = calculator_vmap(batch_k)
 
         if tabulate:
-            Results[i * batch_size:(i + 1) * batch_size] = np.asarray(result)
+            results_list.append(np.asarray(result))
         else:
             result = jnp.sum(result, axis=0)
             Results += result
+
+    if tabulate:
+        return np.concatenate(results_list, axis=0)
     return Results
 
 # run
