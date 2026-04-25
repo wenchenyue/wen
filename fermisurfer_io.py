@@ -3,6 +3,18 @@ import numpy as np
 FRMSF_VERSION = 1
 
 
+def _apply_band_range(results, nwan, band_range):
+    if band_range is None:
+        return results, nwan
+    b_min, b_max = band_range
+    if b_min < 0 or b_max > nwan or b_min >= b_max:
+        raise ValueError(
+            f"band_range ({b_min}, {b_max}) invalid for nwan={nwan}. "
+            f"Expected 0 <= b_min < b_max <= {nwan}."
+        )
+    return results[:, :, b_min:b_max], b_max - b_min
+
+
 def _validate_frmsf_inputs(model, results):
     nkx = getattr(model, 'nkx', None)
     nky = getattr(model, 'nky', None)
@@ -45,96 +57,53 @@ def _write_data_block(f, data_4d):
     np.savetxt(f, flat, fmt='%15.8f')
 
 
-def write_frmsf_energy(model, results, filepath):
-    """
-    Write a .frmsf file containing only band energies (E - EF).
-
-    Parameters
-    ----------
-    model : TB_model
-        The tight-binding model instance (must have nkx, nky, nkz, recip_lattice, EF).
-    results : np.ndarray
-        Tabulated results, shape (nk, 1+n_calc, nwan).
-        results[:, 0, :] must contain band energies.
-    filepath : str
-        Output file path.
-    """
+def write_frmsf_energy(model, results, filepath, band_range=None):
     _validate_frmsf_inputs(model, results)
 
     nkx, nky, nkz = model.nkx, model.nky, model.nkz
     nwan = model.nwan
     EF = model.EF
 
+    results, nwan_out = _apply_band_range(results, nwan, band_range)
+
     energy_flat = np.asarray(results[:, 0, :], dtype=np.float64)
-    energy_4d = energy_flat.reshape(nkx, nky, nkz, nwan)
+    energy_4d = energy_flat.reshape(nkx, nky, nkz, nwan_out)
     energy_4d = energy_4d - EF
 
     with open(filepath, 'w') as f:
-        _write_header(f, nkx, nky, nkz, nwan, np.asarray(model.recip_lattice))
+        _write_header(f, nkx, nky, nkz, nwan_out, np.asarray(model.recip_lattice))
         _write_data_block(f, energy_4d)
 
-    file_size_mb = nkx * nky * nkz * nwan * 18 / (1024 * 1024)
+    file_size_mb = nkx * nky * nkz * nwan_out * 18 / (1024 * 1024)
     print(f"Energy .frmsf written to {filepath} (~{file_size_mb:.1f} MB)")
 
 
-def write_frmsf_quantity(model, results, calc_index, calc_name, filepath):
-    """
-    Write a .frmsf file containing band energies (E - EF) and one physical
-    quantity overlay.
-
-    Parameters
-    ----------
-    model : TB_model
-        The tight-binding model instance.
-    results : np.ndarray
-        Tabulated results, shape (nk, 1+n_calc, nwan).
-    calc_index : int
-        Index of the calculator in results (0-based).
-        results[:, 1+calc_index, :] contains the physical quantity.
-    calc_name : str
-        Name of the physical quantity (used in log message).
-    filepath : str
-        Output file path.
-    """
+def write_frmsf_quantity(model, results, calc_index, calc_name, filepath, band_range=None):
     _validate_frmsf_inputs(model, results)
 
     nkx, nky, nkz = model.nkx, model.nky, model.nkz
     nwan = model.nwan
     EF = model.EF
 
+    results, nwan_out = _apply_band_range(results, nwan, band_range)
+
     energy_flat = np.asarray(results[:, 0, :], dtype=np.float64)
-    energy_4d = energy_flat.reshape(nkx, nky, nkz, nwan)
+    energy_4d = energy_flat.reshape(nkx, nky, nkz, nwan_out)
     energy_4d = energy_4d - EF
 
     quantity_flat = np.asarray(results[:, 1 + calc_index, :], dtype=np.float64)
-    quantity_4d = quantity_flat.reshape(nkx, nky, nkz, nwan)
+    quantity_4d = quantity_flat.reshape(nkx, nky, nkz, nwan_out)
 
     with open(filepath, 'w') as f:
-        _write_header(f, nkx, nky, nkz, nwan, np.asarray(model.recip_lattice))
+        _write_header(f, nkx, nky, nkz, nwan_out, np.asarray(model.recip_lattice))
         _write_data_block(f, energy_4d)
         _write_data_block(f, quantity_4d)
 
-    file_size_mb = nkx * nky * nkz * nwan * 2 * 18 / (1024 * 1024)
+    file_size_mb = nkx * nky * nkz * nwan_out * 2 * 18 / (1024 * 1024)
     print(f"{calc_name} .frmsf written to {filepath} (~{file_size_mb:.1f} MB)")
 
 
-def write_frmsf_all(model, results, output_prefix):
-    """
-    Write .frmsf files for all registered calculators.
-
-    Produces one file per calculator, each containing energy data (E - EF)
-    followed by the physical quantity overlay.
-
-    Parameters
-    ----------
-    model : TB_model
-        The tight-binding model instance.
-        Must have model.all_calculators populated.
-    results : np.ndarray
-        Tabulated results, shape (nk, 1+n_calc, nwan).
-    output_prefix : str
-        Prefix for output files, e.g. "Cu" produces "Cu_OHC_z.frmsf".
-    """
+def write_frmsf_all(model, results, output_prefix, band_range=None):
     _validate_frmsf_inputs(model, results)
 
     all_calculators_name = list(model.all_calculators.keys())
@@ -147,8 +116,8 @@ def write_frmsf_all(model, results, output_prefix):
         )
 
     energy_path = f"{output_prefix}_Energy.frmsf"
-    write_frmsf_energy(model, results, energy_path)
+    write_frmsf_energy(model, results, energy_path, band_range=band_range)
 
     for i, name in enumerate(all_calculators_name):
         quantity_path = f"{output_prefix}_{name}.frmsf"
-        write_frmsf_quantity(model, results, i, name, quantity_path)
+        write_frmsf_quantity(model, results, i, name, quantity_path, band_range=band_range)

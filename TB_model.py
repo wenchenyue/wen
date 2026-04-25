@@ -172,7 +172,7 @@ class TB_model:
         from K_space import build_k_path
         return build_k_path(self,k_points,ticks_label,length)
         
-    def run_all(self,job_name:str,batch_size:int=100,tabulate:bool=False,frmsf:bool=False):
+    def run_all(self,job_name:str,batch_size:int=100,tabulate:bool=False,frmsf:bool=False,band_range=None):
         '''
         run all calculators for given k points
 
@@ -187,6 +187,9 @@ class TB_model:
         frmsf : bool
             If True, export results in FermiSurfer .frmsf format.
             Requires tabulate=True and kbT=0 (no Fermi scanning).
+        band_range : tuple or None
+            (b_min, b_max) 0-based band index range for frmsf output.
+            b_min inclusive, b_max exclusive. None means all bands.
         '''
         if frmsf and not tabulate:
             raise ValueError("frmsf=True requires tabulate=True")
@@ -229,7 +232,7 @@ class TB_model:
         if frmsf:
             from fermisurfer_io import write_frmsf_all
             native_results = np.asarray(Results)
-            write_frmsf_all(self, native_results, job_name)
+            write_frmsf_all(self, native_results, job_name, band_range=band_range)
 
 # test pass
 if __name__ == "__main__":
