@@ -259,4 +259,4 @@ if __name__ == "__main__":
     _,_ = model.make_k_mesh(nkx=100,nky=100,nkz=100)
     
     # run 
-    model.run_all(job_name="modern",batch_size=1000,tabulate=False)
+    model.run_all(job_name="modern",batch_size=1000,tabulate=True,frmsf=True)
