@@ -15,12 +15,6 @@ import scipy
 import matplotlib.pyplot as plt
 from termcolor import cprint
 
-# using  all cpus
-try:
-    parallel.shutdown()
-except NameError:
-    pass
-parallel = wberri.Parallel()
 
 
 # Get the parent directory
@@ -41,7 +35,7 @@ print(f"Use {tb_file}")
 
 
 # initialize the system
-system = wberri.System_tb(f"{tb_file}",berry=True)
+system = wberri.system.System_tb(f"{tb_file}",berry=True)
 
 
 # all necessary data

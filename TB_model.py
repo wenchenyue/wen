@@ -135,6 +135,7 @@ class TB_model:
         '''
         from calculators import make_calc_all
         self.cal_all = make_calc_all(self,kbT,use_A)
+        self.kbT = kbT
         return self.cal_all
     
     def make_k_mesh(self,
@@ -191,8 +192,13 @@ class TB_model:
             (b_min, b_max) 0-based band index range for frmsf output.
             b_min inclusive, b_max exclusive. None means all bands.
         '''
+        if self.cal_all is None:
+            raise ValueError("cal_all is None, please make calculators first")
         if frmsf and not tabulate:
             raise ValueError("frmsf=True requires tabulate=True")
+        if self.kbT != 0.0 and not frmsf:
+            raise ValueError("kbT=0 is required for frmsf=True")
+
 
         res_dict ={}
         if self.k_points is None:
@@ -202,18 +208,16 @@ class TB_model:
         V_k =self.V / nk
 
         from run import run_kps
-        if self.cal_all is None:
-            print("make all calculators using default parameters")
-            print("kbT = 0.026, use_A = False")
-            self.make_calc_all()
         Results = run_kps(k_points,self.cal_all,batch_size=batch_size,tabulate=tabulate)
-        print(Results.shape)
+        print(f"Results shape: {Results.shape}")
+
 
         res_dict["Energy"] = np.asarray(Results[0])
+        
         all_calculators_name = list(self.all_calculators.keys())
         for i,name in enumerate(all_calculators_name):
             if tabulate:
-                res_dict[name] = np.asarray(Results[:,i+1:].reshape((self.nkx,self.nky,self.nkz,-1)))
+                res_dict[name] = np.asarray(Results[i+1].reshape((self.nkx,self.nky,self.nkz,-1)))
             else:
                 res_dict[name] = np.asarray(Results[i+1] * V_k)
         
@@ -222,11 +226,8 @@ class TB_model:
         print(f"finish kubo calculation at {time_str}")
         print("------------------------")
 
-        # save to pickle file
-        import pickle
-        with open(f"{job_name}.pkl", "wb") as f:
-            pickle.dump(res_dict, f)
-        print(f"save to {job_name}.pkl")
+        np.savez_compressed(f"{job_name}_{time_str}.npz", **res_dict)
+        print(f"save to {job_name}_{time_str}.npz")
 
         # export Fermisurfer .frmsf files
         if frmsf:

@@ -21,7 +21,7 @@ def run_kps_gpu_single(
     param calculator: a function, which takes k as input, and return observable as output
     param batch_size: batch size, default is 1000
     param tabulate: whether to tabulate the results, default is False
-    return: observable, shape (nk,n_operator,n_fermi(or n_band)) if tabulate is True, else (n_operator,n_fermi(or n_band))
+    return: observable, shape (n_operator,nk,n_fermi(or n_band)) if tabulate is True, else (n_operator,n_fermi(or n_band))
     '''
     gpu_devices = jax.devices('gpu')
     gpu_device = gpu_devices[0]
@@ -65,7 +65,8 @@ def run_kps_gpu_single(
             Results += jax.device_put(result, device=gpu_device)
 
     if tabulate:
-        return np.concatenate(results_list, axis=0)
+        result = np.concatenate(results_list, axis=0)
+        return np.transpose(result, (1, 0, 2))
     return Results
 
 # multiple gpu version
@@ -81,7 +82,7 @@ def run_kps_gpu_multiple(
     param calculator: a function, which takes k as input, and return observable as output
     param batch_size: batch size, default is 1000
     param tabulate: whether to tabulate the results, default is False
-    return: observable, shape (nk,n_operator,n_fermi(or n_band)) if tabulate is True, else (n_operator,n_fermi(or n_band))
+    return: observable, shape (n_operator,nk,n_fermi(or n_band)) if tabulate is True, else (n_operator,n_fermi(or n_band))
     '''
     gpu_devices = jax.devices('gpu')
     gpu_num = len(gpu_devices)
@@ -131,7 +132,8 @@ def run_kps_gpu_multiple(
             Results += jax.device_put(result, device=gpu_device)
 
     if tabulate:
-        return np.concatenate(results_list, axis=0)
+        result = np.concatenate(results_list, axis=0)
+        return np.transpose(result, (1, 0, 2))
     return Results
 
 def run_kps_cpu(
@@ -146,7 +148,7 @@ def run_kps_cpu(
     param calculator: a function, which takes k as input, and return observable as output
     param batch_size: batch size, default is 1000
     param tabulate: whether to tabulate the results, default is False
-    return: observable, shape (nk,n_operator,n_fermi(or n_band)) if tabulate is True, else (n_operator,n_fermi(or n_band))
+    return: observable, shape (n_operator,nk,n_fermi(or n_band)) if tabulate is True, else (n_operator,n_fermi(or n_band))
     '''
     # make sure using cpu device
     cpu_device = jax.devices("cpu")[0]
@@ -187,7 +189,8 @@ def run_kps_cpu(
             Results += result
 
     if tabulate:
-        return np.concatenate(results_list, axis=0)
+        result = np.concatenate(results_list, axis=0)
+        return np.transpose(result, (1, 0, 2))
     return Results
 
 # run

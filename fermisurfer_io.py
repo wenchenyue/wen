@@ -12,7 +12,7 @@ def _apply_band_range(results, nwan, band_range):
             f"band_range ({b_min}, {b_max}) invalid for nwan={nwan}. "
             f"Expected 0 <= b_min < b_max <= {nwan}."
         )
-    return results[:, :, b_min:b_max], b_max - b_min
+    return results[..., b_min:b_max], b_max - b_min
 
 
 def _validate_frmsf_inputs(model, results):
@@ -35,11 +35,11 @@ def _validate_frmsf_inputs(model, results):
     nk = nkx * nky * nkz
     if results.ndim != 3:
         raise ValueError(
-            f"results should be 3D (nk, n_operator+1, nwan), got shape {results.shape}"
+            f"results should be 3D (n_operator+1, nk, nwan), got shape {results.shape}"
         )
-    if results.shape[0] != nk:
+    if results.shape[1] != nk:
         raise ValueError(
-            f"results first dim {results.shape[0]} != nk {nk}"
+            f"results.shape[1]={results.shape[1]} != nk {nk}"
         )
 
 
@@ -66,7 +66,7 @@ def write_frmsf_energy(model, results, filepath, band_range=None):
 
     results, nwan_out = _apply_band_range(results, nwan, band_range)
 
-    energy_flat = np.asarray(results[:, 0, :], dtype=np.float64)
+    energy_flat = np.asarray(results[0], dtype=np.float64)
     energy_4d = energy_flat.reshape(nkx, nky, nkz, nwan_out)
     energy_4d = energy_4d - EF
 
@@ -87,11 +87,11 @@ def write_frmsf_quantity(model, results, calc_index, calc_name, filepath, band_r
 
     results, nwan_out = _apply_band_range(results, nwan, band_range)
 
-    energy_flat = np.asarray(results[:, 0, :], dtype=np.float64)
+    energy_flat = np.asarray(results[0], dtype=np.float64)
     energy_4d = energy_flat.reshape(nkx, nky, nkz, nwan_out)
     energy_4d = energy_4d - EF
 
-    quantity_flat = np.asarray(results[:, 1 + calc_index, :], dtype=np.float64)
+    quantity_flat = np.asarray(results[1 + calc_index], dtype=np.float64)
     quantity_4d = quantity_flat.reshape(nkx, nky, nkz, nwan_out)
 
     with open(filepath, 'w') as f:
@@ -109,9 +109,9 @@ def write_frmsf_all(model, results, output_prefix, band_range=None):
     all_calculators_name = list(model.all_calculators.keys())
     n_calc = len(all_calculators_name)
 
-    if results.shape[1] != n_calc + 1:
+    if results.shape[0] != n_calc + 1:
         raise ValueError(
-            f"results shape[1]={results.shape[1]} "
+            f"results.shape[0]={results.shape[0]} "
             f"does not match n_calc+1={n_calc + 1}"
         )
 
