@@ -22,3 +22,8 @@
 /TB_W.npz
 /.vscode/
 /*.frmsf
+/verify_operator.py
+/rename_operator_keys.py
+/add_spherical_operators.py
+/operator_original.npz
+/Spherical_Harmonics/
