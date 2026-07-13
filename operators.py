@@ -12,13 +12,20 @@ num_ao = { # num of atomic orbitals for each orbital type, considering spin
 # load pre-defined operator matrix
 operator = jnp.load("operator.npz")
 
+BASIS_OPERATOR_KEYS = {
+    "real_ao": ("S_real_ao", "L_real_ao"),
+    "coupled_ljm": ("S_coupled_ljm", "L_coupled_ljm"),
+    "spherical_ylm": ("S_spherical_ylm", "L_spherical_ylm"),
+}
+
 class operator_matrix_all:
-    def __init__(self,orbital_list:list[str],use_LS_base=False):
+    def __init__(self, orbital_list: list[str], basis: str = "real_ao"):
         self.orbital_list = orbital_list
+        self.basis = basis
         self.orbital_all = build_operator_all(orbital_list)
         self.ndim = len(self.orbital_all)
 
-        self.S,self.L,self.LS = build_operator_LS(orbital_list,use_LS_base=use_LS_base)
+        self.S, self.L, self.LS = build_operator_LS(orbital_list, basis=basis)
 
         self.pre_prepared_operators = {
             'Sx' :self.S[:,:,0],
@@ -103,13 +110,13 @@ def select_orbital_easy(orbital_name_list:list[str],selected:str):
     """
     return [1 if o==selected else 0 for o in orbital_name_list]
 
-def build_operator_LS(orbital_list:list[str],use_LS_base:bool=False):
+def build_operator_LS(orbital_list: list[str], basis: str = "real_ao"):
     """
     build operator matrix for given orbital list
 
     param orbital_list: list of orbital names, e.g. ["spd","p","sd",'f']
-    param use_LS_base: whether to use LS coupled base, 
-    default False, using real Atomic orbital basis
+    param basis: operator basis. Supported values are "real_ao", "coupled_ljm",
+        and "spherical_ylm". The default is "real_ao".
     return: S,L in 3D array, shape (norb,norb,3) and LS in 2D array, shape (norb,norb)
     """
     orbital_str = "".join(orbital_list)
@@ -126,12 +133,15 @@ def build_operator_LS(orbital_list:list[str],use_LS_base:bool=False):
     L = jnp.zeros((norb,norb,3),dtype=DEFAULT_TYPE_COMPLEX)
 
     # choose which operator matrix to use
-    if use_LS_base:
-        S_all = operator["S_LS"]
-        L_all = operator["L_LS"]
-    else:
-        S_all = operator["S"]
-        L_all = operator["L"]
+    try:
+        spin_key, orbital_key = BASIS_OPERATOR_KEYS[basis]
+    except (KeyError, TypeError) as error:
+        supported = ", ".join(repr(name) for name in BASIS_OPERATOR_KEYS)
+        raise ValueError(
+            f"unsupported operator basis {basis!r}; expected one of: {supported}"
+        ) from error
+    S_all = operator[spin_key]
+    L_all = operator[orbital_key]
 
     # seperate each orbitals into a dictionary
     S_AO = {
@@ -165,7 +175,9 @@ def build_operator_LS(orbital_list:list[str],use_LS_base:bool=False):
 # test
 if __name__ == "__main__":
     orbital_list = ["spd"]
-    S,L,LS = build_operator_LS(orbital_list,use_LS_base=True)
+    for basis_name in BASIS_OPERATOR_KEYS:
+        S, L, LS = build_operator_LS(orbital_list, basis=basis_name)
+        print(basis_name, S.shape, L.shape, LS.shape)
     test1 = operator_matrix_all(['spd'])
     print(test1.orbital_all)
     print(test1.pre_prepared_operators.keys())
