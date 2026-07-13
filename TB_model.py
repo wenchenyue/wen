@@ -88,6 +88,16 @@ class TB_model:
         self.all_calculators[name] = make_calc_inner(self,operator, H_gauge)
         return self.all_calculators[name]    
     
+    def make_calc_intra(self,name:str,beta:int=2, operator=None,H_gauge:bool=False):
+        '''
+        make a calculator for intra quantity
+        return: a function, which takes Vec_k and Vel_k as input, and return intra quantity as output
+        '''
+        from calculators import make_calc_intra
+        self.all_calculators[name] = self.make_calc_intra(self,beta,operator, H_gauge)
+        return self.all_calculators[name]  
+
+
     def make_calc_kubo(self,
                         name:str,
                         alpha:int = 0,#1st direction of kubo formula
@@ -128,13 +138,14 @@ class TB_model:
     def make_calc_all(self,
                     kbT:float=0.026, # room temperature
                     use_A:bool=False,
+                    scanner_type:str="FD"
                         ):
         '''
         make all calculators for given model
         return: a dictionary of calculators
         '''
         from calculators import make_calc_all
-        self.cal_all = make_calc_all(self,kbT,use_A)
+        self.cal_all = make_calc_all(self,kbT,use_A,scanner_type)
         self.kbT = kbT
         return self.cal_all
     
