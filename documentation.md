@@ -30,7 +30,8 @@ TB_model/
 ├── utility.py        # 辅助功能和工具函数
 ├── Hk.py             # 哈密顿量计算模块
 ├── run.py            # 计算执行模块
-├── get_WB.py         # WannierBerri数据读取工具
+├── tb_parser.py      # 纯 NumPy *_tb.dat 解析器（推荐）
+├── get_WB.py         # WannierBerri 数据读取工具（可选）
 ├── job.py            # 示例运行脚本
 ├── TB.npz            # 紧束缚模型数据文件
 ├── operator.npz      # 预定义算符数据文件
@@ -195,11 +196,48 @@ v_α = ∂H(k)/∂k_α = i Σ_R e^{ik·(R+τ_ji)} (R_α + τ_ji,α) H(R)
 - 支持多GPU并行计算
 - `tabulate` 参数控制是否保存每个k点的结果
 
-### 9. get_WB.py
+### 9. tb_parser.py
 
-WannierBerri数据读取工具，从 `*_tb.dat` 文件读取数据并保存为npz格式。
+独立的 Wannier90 `*_tb.dat` 解析器，仅依赖 NumPy，不需要安装 WannierBerri。它读取实空间哈密顿量、位置矩阵元、晶格基矢、Wannier 中心和 R 向量，并保存为可由 `TB_io.read_TB_model` 直接读取的 NPZ 文件。
+
+**推荐新的数据转换流程使用 `tb_parser.py`**，以避免为了解析一个 `*_tb.dat` 文件而引入完整的 WannierBerri 依赖。
+
+默认行为：
+
+- 解析 `HR` 和 `AA_R`；
+- 将 `AA_R` 从 Wannier90 convention II 转换为当前 TB 模型使用的 convention I；
+- 输出 `HR`、`AA_R`、`iRvec`、`cRvec`、`real_lattice`、`recip_lattice`、`Wan_center` 和 `num_wann`。
+
+### 10. get_WB.py
+
+WannierBerri 数据读取工具，从 `*_tb.dat` 文件读取数据并保存为 NPZ 格式。该脚本作为兼容和交叉验证方案保留，需要额外安装 WannierBerri；日常数据转换推荐使用 `tb_parser.py`。
 
 ## 使用指南
+
+### 从 `*_tb.dat` 生成 NPZ（推荐）
+
+使用纯 NumPy 解析器：
+
+```powershell
+python tb_parser.py Cu_tb.dat -o TB_Cu.npz
+```
+
+如果不指定 `-o`/`--output`，输出文件默认与输入文件同目录、同主文件名，例如 `Cu_tb.dat` 将生成 `Cu_tb.npz`。
+
+可选参数：
+
+- `--no-aa`：不保存 `AA_R`，仅适用于诊断或自定义流程。当前 `TB_io.read_TB_model` 需要 `AA_R`，因此常规使用不应添加该参数。
+- `--no-conv`：不执行 `AA_R` convention II 到 convention I 的转换。当前 TB 模型数据流程应保持默认转换。
+
+生成后可直接加载：
+
+```python
+from TB_io import read_TB_model
+
+model = read_TB_model("TB_Cu.npz")
+```
+
+在 Cu 模型上，`tb_parser.py` 的结果已与 WannierBerri 生成的 `TB_Cu.npz` 交叉验证：`HR`、`AA_R`、`iRvec`、晶格和 Wannier 中心一致，`cRvec` 仅有约 `1.8e-15` 的浮点舍入误差。
 
 ### 基本使用流程
 
@@ -332,7 +370,7 @@ model.make_calc_all(kbT=0.003, use_A=False, scanner_type="FD_deri")
 - JAX 2.0+
 - NumPy
 - tqdm (进度显示)
-- WannierBerri (可选，用于数据转换)
+- WannierBerri（可选，仅用于 `get_WB.py` 兼容或交叉验证流程）
 
 ## 性能优化建议
 
@@ -344,7 +382,7 @@ model.make_calc_all(kbT=0.003, use_A=False, scanner_type="FD_deri")
 
 ## 注意事项
 
-1. 确保 TB.npz 文件包含正确格式的紧束缚模型数据
+1. 推荐使用 `tb_parser.py` 将 Wannier90 `*_tb.dat` 转换为 NPZ，并确保 NPZ 文件包含正确格式的紧束缚模型数据
 2. 使用GPU时注意内存限制，必要时减小 `batch_size`
 3. 对于低温计算，设置合适的 `kbT` 值以避免数值不稳定
 4. 在使用Kubo公式计算时，调整 `Gamma` 参数以获得合适的展宽
