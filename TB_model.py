@@ -184,7 +184,7 @@ class TB_model:
         from K_space import build_k_path
         return build_k_path(self,k_points,ticks_label,length)
         
-    def run_all(self,job_name:str,batch_size:int=100,tabulate:bool=False,frmsf:bool=False,band_range=None):
+    def run_all(self,job_name:str,batch_size:int=100,tabulate:bool=False,save_npz:bool=True,frmsf:bool=False,band_range=None):
         '''
         run all calculators for given k points
 
@@ -236,15 +236,18 @@ class TB_model:
         time_str = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime())
         print(f"finish kubo calculation at {time_str}")
         print("------------------------")
-
-        np.savez_compressed(f"{job_name}_{time_str}.npz", **res_dict)
-        print(f"save to {job_name}_{time_str}.npz")
+        if save_npz:
+            np.savez_compressed(f"{job_name}_{time_str}.npz", **res_dict)
+            print(f"save to {job_name}_{time_str}.npz")
 
         # export Fermisurfer .frmsf files
         if frmsf:
             from fermisurfer_io import write_frmsf_all
             native_results = np.asarray(Results)
             write_frmsf_all(self, native_results, job_name, band_range=band_range)
+        
+        # return
+        return res_dict
 
 # test pass
 if __name__ == "__main__":
