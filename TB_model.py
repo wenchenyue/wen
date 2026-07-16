@@ -2,7 +2,7 @@
 import numpy as np
 import jax
 import jax.numpy as jnp
-from utility import cal_center_matrix, find_EF
+from utility import cal_center_matrix, find_EF,DEFAULT_TYPE_COMPLEX, DEFAULT_TYPE_REAL
 from dataclasses import dataclass
 
 # data class========================= BEGIN
@@ -23,6 +23,7 @@ class TB_model:
         self.nwan = self.HR.shape[-1] # number of wannier functions
         self.nR = self.HR.shape[0] # number of R points
         self.center_matrix = cal_center_matrix(self.center_list) # (nwan,nwan,3)
+        self.distance_all = self.get_distance_all() # in shape (nR,nwan,nwan)
 
         b1 = self.recip_lattice[0]
         b2 = self.recip_lattice[1]
@@ -39,8 +40,44 @@ class TB_model:
         
         # print some info
         print (f"TB_model: nwan={self.nwan}, nR={self.nR}")
-        
+
+
+    def get_distance_all(self):
+        """
+        calculate the distance between all pairs of orbitals
+        Delta(m,n,R) = (rn + R) - rm
+        """
+        diff_all = jnp.zeros((self.nR,self.nwan,self.nwan,3), dtype=DEFAULT_TYPE_REAL)
+        for i, vec in enumerate(self.cell_center):
+            diff_all = diff_all.at[i,:,:,:].set(self.center_matrix + vec)
+        distance_all = jnp.linalg.norm(diff_all, axis=-1)
+        return distance_all     
     
+    def cut_off(self, cut_off_radius: float = 6.0):
+        """
+        cut off the Hamiltonian matrix
+        drop all the matrix elements whose distance is larger than cut_off_radius
+        """
+
+        print(f"cut off the Hamiltonian elements with distance > {cut_off_radius}")
+        
+        # in shape (nR,nwan,nwan)
+        mask = self.distance_all <= cut_off_radius
+        self.HR = self.HR * mask 
+
+        exclude_list = []   
+        for i in range(self.nR):
+            H_max = jnp.max(jnp.abs(self.HR[i,:,:]))
+            if H_max < 1e-9:
+                exclude_list.append(i)
+        exclude_array = jnp.array(exclude_list)
+        self.HR = jnp.delete(self.HR, exclude_array, axis=0)
+        self.cell_center = jnp.delete(self.cell_center, exclude_array, axis=0)
+        self.distance_all = jnp.delete(self.distance_all, exclude_array, axis=0)
+        self.AA_R = jnp.delete(self.AA_R, exclude_array, axis=0)
+        self.nR = self.HR.shape[0]
+
+
     def set_EF(self, file_name: str):
         self.EF = find_EF(file_name)
         print (f"EF={self.EF}")
