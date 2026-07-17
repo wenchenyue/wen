@@ -244,7 +244,7 @@ class TB_model:
             raise ValueError("cal_all is None, please make calculators first")
         if frmsf and not tabulate:
             raise ValueError("frmsf=True requires tabulate=True")
-        if self.kbT != 0.0 and not frmsf:
+        if self.kbT != 0.0 and  frmsf:
             raise ValueError("kbT=0 is required for frmsf=True")
 
 
