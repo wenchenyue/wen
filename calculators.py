@@ -513,7 +513,7 @@ def make_calc_intra(model:TB_model,
     for band n in direction beta is:
     
     ```
-    O_intra(k,n,beta) = <u(n,k)|v_beta|u(n,k)> * <u(n,k)|O|u(n,k)>
+    O_intra(k,n,beta) = |<u(n,k)|v_beta|u(n,k)>| * <u(n,k)|O|u(n,k)>
     ```
     
     **Physical Interpretation:**
@@ -612,7 +612,9 @@ def make_calc_intra(model:TB_model,
         # Using einsum: 'ij,jk,ki->i' performs the matrix multiplication
         # and takes diagonal elements to get expectation values
         v_beta = jnp.einsum('ij,jk,ki->i', Vec_k_dagger, Vel_k[:,:,beta], Vec_k)
-        
+        # take Absolute value
+        v_beta = jnp.abs(v_beta)
+
         # Calculate operator expectation value O(n) = ⟨u(n,k)|O|u(n,k)⟩
         # based on H_gauge parameter
         if H_gauge:
