@@ -131,7 +131,7 @@ class TB_model:
         return: a function, which takes Vec_k and Vel_k as input, and return intra quantity as output
         '''
         from calculators import make_calc_intra
-        self.all_calculators[name] = self.make_calc_intra(self,beta,operator, H_gauge)
+        self.all_calculators[name] = make_calc_intra(self,beta,operator, H_gauge)
         return self.all_calculators[name]  
 
 
