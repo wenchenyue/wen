@@ -3,7 +3,7 @@ import types
 import jax
 import jax.numpy as jnp
 from TB_model import TB_model
-from utility import fermi_dirac_vamp, fermi_dirac_derivative_neg_vamp,DEFAULT_TYPE_COMPLEX, DEFAULT_TYPE_REAL
+from utility import fermi_dirac_vamp, fermi_dirac_derivative_neg_vmap,DEFAULT_TYPE_COMPLEX, DEFAULT_TYPE_REAL
 from Hk import make_k_hamiltonian_calculator, make_k_hamiltonian_velocity_calculator
 
 
@@ -754,7 +754,7 @@ def make_calc_all(model:TB_model,
         
         scanner_type = scanner_type.lower()
         if scanner_type == "fd":
-            scanner_func = fermi_dirac_vamp
+            scanner_func = fermi_dirac_vmap
             print("using standard Fermi-Dirac distribution scanner")
         elif scanner_type == "fd_deri": # negtive derivative of fermi-dirac function
             scanner_func = fermi_dirac_derivative_neg_vamp
