@@ -172,9 +172,9 @@ v_α = ∂H(k)/∂k_α = i Σ_R e^{ik·(R+τ_ji)} (R_α + τ_ji,α) H(R)
 #### 费米-狄拉克分布相关函数
 
 - `fermi_dirac(E, mu, kBT)`: 费米-狄拉克分布函数
-- `fermi_dirac_vamp`: 向量化的费米分布函数
+- `fermi_dirac_vmap`: 向量化的费米分布函数
 - `fermi_dirac_derivative(E, mu, kBT)`: 费米-狄拉克分布的导数
-- `fermi_dirac_derivative_vamp`: 向量化的费米分布导数
+- `fermi_dirac_derivative_vmap`: 向量化的费米分布导数
 
 #### 其他工具函数
 

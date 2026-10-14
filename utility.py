@@ -13,15 +13,15 @@ DEFAULT_TYPE_REAL = jnp.float64
 # fermi-dirac funtion
 def fermi_dirac(E,mu,kBT) -> float:
     return 1.0/(jnp.exp((E-mu)/kBT)+1)
-# vamp it, E is an array, in  shape of (nE,), 
+# vmap it, E is an array, in  shape of (nE,), 
 # return an F-D distrubution of a whole range of E
-fermi_dirac_vamp = jax.vmap(fermi_dirac,in_axes=(0,None,None))
+fermi_dirac_vmap = jax.vmap(fermi_dirac,in_axes=(0,None,None))
 
 # derivative of fermi-dirac function
 def fermi_dirac_derivative(E,mu,kBT) -> float:
     f = fermi_dirac(E, mu, kBT)
     return -f * (1 - f) / (kBT)
-# vamp it, E is an array, in  shape of (nE,), 
+# vmap it, E is an array, in  shape of (nE,), 
 # return an F-D distrubution of a whole range of E
 fermi_dirac_derivative_vmap = jax.vmap(fermi_dirac_derivative,in_axes=(0,None,None))
 
@@ -29,7 +29,7 @@ fermi_dirac_derivative_vmap = jax.vmap(fermi_dirac_derivative,in_axes=(0,None,No
 def fermi_dirac_derivative_neg(E,mu,kBT) -> float:
     f = fermi_dirac(E, mu, kBT)
     return f * (1 - f) / (kBT)
-# vamp it, E is an array, in  shape of (nE,), 
+# vmap it, E is an array, in  shape of (nE,), 
 # return an F-D distrubution of a whole range of E
 fermi_dirac_derivative_neg_vmap = jax.vmap(fermi_dirac_derivative_neg,in_axes=(0,None,None))
 

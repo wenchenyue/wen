@@ -3,7 +3,7 @@ import types
 import jax
 import jax.numpy as jnp
 from TB_model import TB_model
-from utility import fermi_dirac_vamp, fermi_dirac_derivative_neg_vmap,DEFAULT_TYPE_COMPLEX, DEFAULT_TYPE_REAL
+from utility import fermi_dirac_vmap, fermi_dirac_derivative_neg_vmap,DEFAULT_TYPE_COMPLEX, DEFAULT_TYPE_REAL
 from Hk import make_k_hamiltonian_calculator, make_k_hamiltonian_velocity_calculator
 
 
@@ -757,7 +757,7 @@ def make_calc_all(model:TB_model,
             scanner_func = fermi_dirac_vmap
             print("using standard Fermi-Dirac distribution scanner")
         elif scanner_type == "fd_deri": # negtive derivative of fermi-dirac function
-            scanner_func = fermi_dirac_derivative_neg_vamp
+            scanner_func = fermi_dirac_derivative_neg_vmap
             print("using Fermi-Dirac derivative scanner")
         else:
             raise ValueError(f"Invalid scanner_type: {scanner_type}. Must be 'FD' or 'FD_deri'")
@@ -925,7 +925,7 @@ def make_calc_mag_scan(model:TB_model,
         #BC = BC_calculator(E_k,Vec_k,velocity_k)
         #mag = Mag_calculator(E_k,Vec_k,velocity_k)
         
-        f_distribution = fermi_dirac_vamp(E_k,E_fermis,kbT) # nwan * len(E_fermis)
+        f_distribution = fermi_dirac_vmap(E_k,E_fermis,kbT) # nwan * len(E_fermis)
 
         Term_A = f_distribution[None,:,:] * mag_A[:,:,None] # 3 *  nwan * len(E_fermis)  
         Term_B = f_distribution[None,:,:] * mag_B[:,:,None] * E_fermis[None,None,:]# 3 * nwan * len(E_fermis) 
